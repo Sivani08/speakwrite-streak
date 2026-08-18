@@ -668,7 +668,8 @@ export async function submitRevisionReview(
   const interval =
     SCORING_CONFIG.revisionIntervalDays[
       Math.min(reviewCount, SCORING_CONFIG.revisionIntervalDays.length - 1)
-    ];
+    ] ?? 7;
+
 
   await ctx.supabase
     .from("revision_items")
@@ -694,7 +695,13 @@ export async function submitRevisionReview(
 
 export async function updateProfile(
   ctx: Ctx,
-  input: { fullName?: string; timezone?: string; theme?: string; notificationsEnabled?: boolean },
+  input: {
+    fullName?: string | undefined;
+    timezone?: string | undefined;
+    theme?: string | undefined;
+    notificationsEnabled?: boolean | undefined;
+  },
+
 ) {
   const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
   if (input.fullName !== undefined) patch["full_name"] = input.fullName.trim().slice(0, 80);
