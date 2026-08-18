@@ -49,9 +49,18 @@ function AuthPage() {
     if (loading) return;
 
     if (isSignup) {
-      if (fullName.trim().length < 2) return toast.error("Please enter your full name.");
-      if (password.length < 8) return toast.error("Use a password of at least 8 characters.");
-      if (password !== confirm) return toast.error("Passwords don't match.");
+      if (fullName.trim().length < 2) {
+        toast.error("Please enter your full name.");
+        return;
+      }
+      if (password.length < 8) {
+        toast.error("Use a password of at least 8 characters.");
+        return;
+      }
+      if (password !== confirm) {
+        toast.error("Passwords don't match.");
+        return;
+      }
     }
 
     setLoading(true);
