@@ -3,6 +3,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   analyzeWordWithAI,
   evaluateRecallWithAI,
+  evaluateMeaningWithAI,
+
   evaluateSentencesWithAI,
   evaluateSpeechWithAI,
   transcribeAudio,
