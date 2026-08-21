@@ -462,41 +462,33 @@ export async function submitSpeech(
 
 export async function submitRecall(
   ctx: Ctx,
-  input: { challengeId: string; synonym: string; antonym: string; today: string },
+  input: { challengeId: string; meaning: string; today: string },
 ) {
   const today = assertDate(input.today);
   const challenge = await loadOwnedChallenge(ctx, input.challengeId);
-  const synonym = input.synonym.trim();
-  const antonym = input.antonym.trim();
-  if (!synonym || !antonym) fail("Please provide both a synonym and an antonym.");
+  const meaning = input.meaning.trim();
+  if (meaning.length < 3) fail("Please write the meaning of the word.");
 
-  const evaluation = await evaluateRecallWithAI({ word: challenge.word, synonym, antonym });
-  const score = evaluation.synonymCorrect && evaluation.antonymCorrect
-    ? 100
-    : evaluation.synonymCorrect || evaluation.antonymCorrect
-      ? 50
-      : 0;
+  const evaluation = await evaluateMeaningWithAI({ word: challenge.word, meaning });
+  const score = Math.max(0, Math.min(100, Math.round(evaluation.score)));
+  const passed = evaluation.correct && score >= 70;
 
   await ctx.supabase.from("recall_submissions").insert({
     user_id: ctx.userId,
     challenge_id: challenge.id,
-    synonym,
-    antonym,
-    synonym_correct: evaluation.synonymCorrect,
-    antonym_correct: evaluation.antonymCorrect,
+    synonym: meaning,
+    antonym: null,
+    synonym_correct: passed,
+    antonym_correct: passed,
     score,
-    feedback: `${evaluation.synonymFeedback} ${evaluation.antonymFeedback}`.trim(),
+    feedback: evaluation.feedback,
   });
 
-  const passed = evaluation.synonymCorrect && evaluation.antonymCorrect;
   if (!passed) {
     return {
       passed: false,
       score,
-      synonymCorrect: evaluation.synonymCorrect,
-      antonymCorrect: evaluation.antonymCorrect,
-      synonymFeedback: evaluation.synonymFeedback,
-      antonymFeedback: evaluation.antonymFeedback,
+      feedback: evaluation.feedback,
       completion: null,
     };
   }
@@ -510,13 +502,11 @@ export async function submitRecall(
   return {
     passed: true,
     score,
-    synonymCorrect: true,
-    antonymCorrect: true,
-    synonymFeedback: evaluation.synonymFeedback,
-    antonymFeedback: evaluation.antonymFeedback,
+    feedback: evaluation.feedback,
     completion,
   };
 }
+
 
 /* -------------------------------- completion -------------------------------- */
 
