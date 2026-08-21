@@ -538,7 +538,7 @@ async function completeChallenge(ctx: Ctx, args: { challenge: any; recallScore: 
     .eq("id", challenge.id)
     .eq("user_id", userId);
 
-  // Streak: awarded at most once per calendar day.
+  // Streak: counts every word mastered (multiple words in one day each count).
   const { data: streak } = await supabase
     .from("streaks")
     .select("*")
@@ -549,9 +549,8 @@ async function completeChallenge(ctx: Ctx, args: { challenge: any; recallScore: 
   let longest = streak?.longest_streak ?? 0;
   let streakIncreased = false;
 
-  if (!alreadyCompleted && streak?.last_completed_date !== today) {
-    const gap = streak?.last_completed_date ? daysBetween(streak.last_completed_date, today) : null;
-    current = gap === 1 ? current + 1 : 1;
+  if (!alreadyCompleted) {
+    current = current + 1;
     longest = Math.max(longest, current);
     streakIncreased = true;
     await supabase
@@ -567,6 +566,7 @@ async function completeChallenge(ctx: Ctx, args: { challenge: any; recallScore: 
         { onConflict: "user_id" },
       );
   }
+
 
   // Spaced repetition scheduling.
   if (challenge.vocabulary_word_id) {
