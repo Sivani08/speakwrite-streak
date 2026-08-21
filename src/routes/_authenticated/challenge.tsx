@@ -186,6 +186,13 @@ function PickWord({ today, onStarted }: { today: string; onStarted: () => void }
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type ChallengeData = any;
 
+/** Blocks copy/paste/cut so learners type answers themselves. */
+function blockClipboard(event: React.ClipboardEvent<HTMLElement>) {
+  event.preventDefault();
+  toast.error("Copy and paste are disabled — type it yourself.");
+}
+
+
 /* --------------------------------- learn --------------------------------- */
 
 function LearnStep({ data, onNext }: { data: ChallengeData; onNext: () => void }) {
