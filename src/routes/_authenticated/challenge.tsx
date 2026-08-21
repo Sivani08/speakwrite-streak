@@ -325,8 +325,13 @@ function WriteStep({ data, onDone }: { data: ChallengeData; onDone: () => void }
                   next[index] = event.target.value;
                   setValues(next);
                 }}
+                onPaste={blockClipboard}
+                onCopy={blockClipboard}
+                onCut={blockClipboard}
+                onDrop={(event) => event.preventDefault()}
                 placeholder={`Use "${data.challenge.word}" naturally…`}
               />
+
               {result && (
                 <p className={result.passed ? "text-success text-sm" : "text-destructive text-sm"}>
                   {result.passed ? "✓" : "⚠️"} {result.overallScore}% — {result.feedback}
