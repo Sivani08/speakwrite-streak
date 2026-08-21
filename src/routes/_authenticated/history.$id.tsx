@@ -134,11 +134,10 @@ function WordDetails() {
             {recall ? (
               <>
                 <p>
-                  Synonym: {recall.synonym} {recall.synonym_correct ? "✓" : "✗"}
+                  Meaning given: {recall.synonym} {recall.synonym_correct ? "✓" : "✗"}
                 </p>
-                <p>
-                  Antonym: {recall.antonym} {recall.antonym_correct ? "✓" : "✗"}
-                </p>
+                {recall.antonym && <p>Antonym: {recall.antonym}</p>}
+
                 {recall.feedback && <p className="text-muted-foreground">{recall.feedback}</p>}
               </>
             ) : (
