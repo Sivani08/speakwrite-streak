@@ -44,7 +44,7 @@ const STEPS = [
   {
     number: "04",
     title: "Recall",
-    body: "Give a synonym and an antonym. Semantic checking accepts real alternatives.",
+    body: "Explain the meaning in your own words. AI checks it semantically.",
     icon: Brain,
   },
 ];
