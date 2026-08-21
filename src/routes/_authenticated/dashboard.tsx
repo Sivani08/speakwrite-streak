@@ -55,7 +55,7 @@ function Dashboard() {
       subtitle="One word a day. Learn it, write it, speak it, remember it."
     >
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatTile label="Current streak" value={`🔥 ${data.streak.current_streak} days`} accent />
+        <StatTile label="Current streak" value={`🔥 ${data.streak.current_streak} words`} accent />
         <StatTile label="Longest streak" value={`🔥 ${data.streak.longest_streak} days`} />
         <StatTile label="Words learned" value={data.wordsLearned} />
         <StatTile
