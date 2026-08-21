@@ -85,8 +85,8 @@ export const evaluateRecall = createServerFn({ method: "POST" })
     z
       .object({
         challengeId: z.string().uuid(),
-        synonym: z.string().min(1).max(60),
-        antonym: z.string().min(1).max(60),
+        meaning: z.string().min(3).max(300),
+
         today: z.string(),
       })
       .parse(input),
