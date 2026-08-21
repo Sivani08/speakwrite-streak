@@ -186,6 +186,13 @@ function PickWord({ today, onStarted }: { today: string; onStarted: () => void }
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type ChallengeData = any;
 
+/** Blocks copy/paste/cut so learners type answers themselves. */
+function blockClipboard(event: React.ClipboardEvent<HTMLElement>) {
+  event.preventDefault();
+  toast.error("Copy and paste are disabled — type it yourself.");
+}
+
+
 /* --------------------------------- learn --------------------------------- */
 
 function LearnStep({ data, onNext }: { data: ChallengeData; onNext: () => void }) {
@@ -318,8 +325,13 @@ function WriteStep({ data, onDone }: { data: ChallengeData; onDone: () => void }
                   next[index] = event.target.value;
                   setValues(next);
                 }}
+                onPaste={blockClipboard}
+                onCopy={blockClipboard}
+                onCut={blockClipboard}
+                onDrop={(event) => event.preventDefault()}
                 placeholder={`Use "${data.challenge.word}" naturally…`}
               />
+
               {result && (
                 <p className={result.passed ? "text-success text-sm" : "text-destructive text-sm"}>
                   {result.passed ? "✓" : "⚠️"} {result.overallScore}% — {result.feedback}
@@ -465,24 +477,22 @@ function RecallStep({
   today: string;
   onDone: () => void;
 }) {
-  const [synonym, setSynonym] = useState("");
-  const [antonym, setAntonym] = useState("");
+  const [meaning, setMeaning] = useState("");
   const submit = useServerFn(evaluateRecall);
   const [feedback, setFeedback] = useState<string | null>(null);
 
   const mutation = useMutation({
-    mutationFn: () =>
-      submit({ data: { challengeId: data.challenge.id, synonym, antonym, today } }),
+    mutationFn: () => submit({ data: { challengeId: data.challenge.id, meaning: meaning.trim(), today } }),
     onSuccess: (result) => {
-      setFeedback(`${result.synonymFeedback} ${result.antonymFeedback}`.trim());
+      setFeedback(result.feedback);
       if (result.passed) {
         toast.success("Challenge complete — streak earned! 🔥");
         onDone();
       } else {
-        toast.error("Not both correct yet — try again.");
+        toast.error("Not quite right — try explaining it again.");
       }
     },
-    onError: (error: Error) => toast.error(error.message || "Could not check your answers."),
+    onError: (error: Error) => toast.error(error.message || "Could not check your answer."),
   });
 
   return (
@@ -492,46 +502,41 @@ function RecallStep({
       </CardHeader>
       <CardContent className="space-y-4">
         <p className="text-muted-foreground text-sm">
-          Without scrolling back: give one synonym and one antonym of "{data.challenge.word}".
+          Without scrolling back: write the meaning of "{data.challenge.word}" in your own words.
         </p>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className="space-y-1.5">
-            <Label htmlFor="synonym">Synonym</Label>
-            <Input
-              id="synonym"
-              value={synonym}
-              onChange={(event) => setSynonym(event.target.value)}
-              autoComplete="off"
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="antonym">Antonym</Label>
-            <Input
-              id="antonym"
-              value={antonym}
-              onChange={(event) => setAntonym(event.target.value)}
-              autoComplete="off"
-            />
-          </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="meaning">Meaning</Label>
+          <Textarea
+            id="meaning"
+            rows={3}
+            value={meaning}
+            onChange={(event) => setMeaning(event.target.value)}
+            onPaste={blockClipboard}
+            onCopy={blockClipboard}
+            onCut={blockClipboard}
+            placeholder="It means…"
+            autoComplete="off"
+          />
         </div>
         {feedback && <p className="bg-secondary rounded-xl p-3 text-sm">{feedback}</p>}
         <Button
           size="lg"
           onClick={() => mutation.mutate()}
-          disabled={mutation.isPending || !synonym.trim() || !antonym.trim()}
+          disabled={mutation.isPending || meaning.trim().length < 3}
         >
           {mutation.isPending ? (
             <>
               <Loader2 className="size-4 animate-spin" aria-hidden /> Checking…
             </>
           ) : (
-            "Check my recall"
+            "Submit meaning"
           )}
         </Button>
       </CardContent>
     </Card>
   );
 }
+
 
 /* -------------------------------- complete -------------------------------- */
 

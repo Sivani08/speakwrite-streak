@@ -139,6 +139,28 @@ export function evaluateRecallWithAI(input: { word: string; synonym: string; ant
   );
 }
 
+export const meaningEvalSchema = z.object({
+  correct: z.boolean(),
+  score: z.number(),
+  feedback: z.string(),
+});
+export type MeaningEvaluation = z.infer<typeof meaningEvalSchema>;
+
+export function evaluateMeaningWithAI(input: { word: string; meaning: string }) {
+  return generateStructured(
+    meaningEvalSchema,
+    [
+      "You check whether a learner correctly explained the meaning of an English word from memory.",
+      "Accept any wording that captures the core sense, including informal or partial-but-accurate definitions.",
+      "Reject vague, empty, circular, or wrong explanations.",
+      "score is 0-100 based on accuracy and clarity; 70+ means correct.",
+      "feedback is one short encouraging sentence; if wrong, hint at the sense without giving the full definition.",
+    ].join(" "),
+    JSON.stringify(input),
+  );
+}
+
+
 /* ------------------------------ Speech analysis ----------------------------- */
 
 export const speechEvalSchema = z.object({
