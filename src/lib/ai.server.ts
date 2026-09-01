@@ -43,8 +43,9 @@ export const wordAnalysisSchema = z.object({
   detailedMeaning: z.string(),
   breakdownAvailable: z.boolean(),
   prefix: z.string().nullable(),
-  root: z.string().nullable(),
-  suffix: z.string().nullable(),
+  prefixMeaning: z.string().nullable(),
+  prefixExampleWord: z.string().nullable(),
+  prefixExampleMeaning: z.string().nullable(),
   example: z.string(),
   synonyms: z.array(z.string()),
   antonyms: z.array(z.string()),
@@ -57,12 +58,46 @@ export function analyzeWordWithAI(word: string) {
     wordAnalysisSchema,
     [
       "You are a precise English lexicographer for a vocabulary learning app.",
-      "Return structured data only. Never invent morphology: set breakdownAvailable to false and prefix/root/suffix to null unless the word has a genuinely reliable prefix/root/suffix analysis.",
+      "Teach PREFIXES ONLY. Never analyse roots or suffixes.",
+      "If the word begins with a genuine, standard English prefix (e.g. re-, un-, pre-, dis-, mis-, sub-, inter-, trans-, over-, under-, non-, anti-, co-, ex-, semi-, micro-, mono-, bi-, auto-, tele-), set breakdownAvailable true, prefix to that prefix (written like 'pre-'), prefixMeaning to its accurate linguistic meaning (e.g. 'before, in advance'), prefixExampleWord to a DIFFERENT real English word using the same prefix, and prefixExampleMeaning to that word's short meaning.",
+      "If the word has no genuine prefix, set breakdownAvailable false and prefix, prefixMeaning, prefixExampleWord, prefixExampleMeaning all to null. Never invent a prefix or a prefix meaning.",
       "pronunciation must be a simple readable respelling like 'meh-TIK-yuh-lus'.",
       "difficulty must be exactly one of: beginner, intermediate, advanced.",
-      "If the input is not a real English word (gibberish, misspelling, or not English), set isEnglishWord to false and leave the other fields as empty strings or empty arrays.",
+      "If the input is not a real English word (gibberish, misspelling, or not English), set isEnglishWord to false and leave the other fields as empty strings, empty arrays or null.",
     ].join(" "),
     `Analyze this word: "${word}"`,
+  );
+}
+
+/* --------------------------- Prefix word validation ------------------------- */
+
+export const prefixWordSchema = z.object({
+  isRealWord: z.boolean(),
+  usesPrefix: z.boolean(),
+  meaningCorrect: z.boolean(),
+  score: z.number(),
+  feedback: z.string(),
+});
+export type PrefixWordEvaluation = z.infer<typeof prefixWordSchema>;
+
+export function evaluatePrefixWordWithAI(input: {
+  prefix: string;
+  prefixMeaning: string;
+  learnedWord: string;
+  candidateWord: string;
+  candidateMeaning: string;
+}) {
+  return generateStructured(
+    prefixWordSchema,
+    [
+      "You validate a learner's new word built from a taught English prefix.",
+      "isRealWord: true only if candidateWord is a real, standard English word found in dictionaries. Reject invented, misspelled or nonsense words.",
+      "usesPrefix: true only if candidateWord genuinely begins with the given prefix used as that prefix, and is different from the learned word.",
+      "meaningCorrect: true if the learner's meaning captures the real meaning of candidateWord; accept simple wording.",
+      "score is 100 when all three are true, 50 when the word is real and uses the prefix but the meaning is off, and 0 otherwise.",
+      "feedback is one short, encouraging sentence naming exactly what is wrong when something is wrong.",
+    ].join(" "),
+    JSON.stringify(input),
   );
 }
 
@@ -81,7 +116,15 @@ export const sentenceEvalSchema = z.object({
       overallScore: z.number(),
       passed: z.boolean(),
       feedback: z.string(),
-      errors: z.array(z.string()),
+      errors: z.array(
+        z.object({
+          phrase: z.string(),
+          correction: z.string(),
+          explanation: z.string(),
+          type: z.string(),
+        }),
+      ),
+      suggestions: z.array(z.string()),
     }),
   ),
   overallScore: z.number(),
@@ -95,16 +138,18 @@ export function evaluateSentencesWithAI(input: {
   aiExample: string;
   sentences: string[];
 }) {
-  const w = SCORING_CONFIG.sentenceWeights;
   return generateStructured(
     sentenceEvalSchema,
     [
-      "You are a supportive but rigorous English writing evaluator.",
-      `Score each sentence 0-100 using these weights: vocabulary usage ${w.usage * 100}%, grammar ${w.grammar * 100}%, context ${w.context * 100}%, sentence structure ${w.structure * 100}%, naturalness ${w.naturalness * 100}%.`,
-      `A sentence passes when it contains the target word, is grammatically meaningful, and scores at least ${SCORING_CONFIG.writingPassScore}.`,
-      "Accept correct sentences even if you would phrase them differently — style preferences are not errors.",
-      "Penalise a sentence heavily only if the target word is missing, misused, or the sentence copies the AI example almost word for word.",
-      "Feedback must teach: name the issue and how to think about fixing it, but never rewrite the sentence for the learner.",
+      "You are an accurate English grammar checker for a vocabulary app.",
+      "Check ONLY genuine errors: grammar, spelling, punctuation, broken sentence structure, and incorrect use of the target vocabulary word.",
+      "NEVER penalise a sentence for being short, simple, generic, unsophisticated, or different from the example sentence. Simple correct sentences must score 100.",
+      "Style or 'more natural' rewrites are optional suggestions only: put them in suggestions and NEVER let them reduce the score or appear in errors.",
+      "errors contains ONE entry per genuine mistake: phrase must be the EXACT substring of the learner's sentence that is wrong (copied character for character, no added words), correction is the fixed form of just that phrase, explanation is one short sentence, type is one of grammar, spelling, punctuation, structure, usage.",
+      "If a sentence has no genuine errors, errors must be an empty array and overallScore must be 100.",
+      "Deduct roughly 15 points per genuine error, and score 30 or lower only when the target word is missing or clearly misused.",
+      `A sentence passes when it contains the target word and scores at least ${SCORING_CONFIG.writingPassScore}.`,
+      "Never rewrite the whole sentence for the learner.",
       "overallScore is the average of the sentence scores. passed is true only when every sentence passes.",
     ].join(" "),
     JSON.stringify({

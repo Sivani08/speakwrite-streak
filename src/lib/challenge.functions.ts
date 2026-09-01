@@ -53,7 +53,10 @@ export const evaluateSentences = createServerFn({ method: "POST" })
         challengeId: z.string().uuid(),
         sentences: z
           .array(z.object({ text: z.string().min(1).max(400), typingDurationMs: z.number() }))
-          .length(3),
+          .min(1)
+          .max(3),
+        prefixWord: z.string().max(60).optional(),
+        prefixWordMeaning: z.string().max(200).optional(),
       })
       .parse(input),
   )

@@ -6,6 +6,7 @@ import {
   evaluateMeaningWithAI,
 
   evaluateSentencesWithAI,
+  evaluatePrefixWordWithAI,
   evaluateSpeechWithAI,
   transcribeAudio,
 } from "./ai.server";
@@ -246,8 +247,11 @@ export async function startChallenge(ctx: Ctx, input: { word: string; today: str
         detailed_meaning: analysis.detailedMeaning,
         breakdown_available: analysis.breakdownAvailable,
         prefix: analysis.breakdownAvailable ? analysis.prefix : null,
-        root: analysis.breakdownAvailable ? analysis.root : null,
-        suffix: analysis.breakdownAvailable ? analysis.suffix : null,
+        prefix_meaning: analysis.breakdownAvailable ? analysis.prefixMeaning : null,
+        prefix_example_word: analysis.breakdownAvailable ? analysis.prefixExampleWord : null,
+        prefix_example_meaning: analysis.breakdownAvailable ? analysis.prefixExampleMeaning : null,
+        root: null,
+        suffix: null,
         example: analysis.example,
         synonyms: analysis.synonyms,
         antonyms: analysis.antonyms,
@@ -265,7 +269,26 @@ export async function startChallenge(ctx: Ctx, input: { word: string; today: str
     } else {
       vocab = inserted;
     }
+  } else if (vocab.prefix_meaning == null) {
+    // Older cached words were stored before prefix teaching existed — top them up.
+    const analysis = await analyzeWordWithAI(word);
+    if (analysis.isEnglishWord && analysis.breakdownAvailable) {
+      const { data: updated } = await supabase
+        .from("vocabulary_words")
+        .update({
+          breakdown_available: true,
+          prefix: analysis.prefix,
+          prefix_meaning: analysis.prefixMeaning,
+          prefix_example_word: analysis.prefixExampleWord,
+          prefix_example_meaning: analysis.prefixExampleMeaning,
+        })
+        .eq("id", vocab.id)
+        .select("*")
+        .single();
+      if (updated) vocab = updated;
+    }
   }
+
 
   const { data: challenge, error: challengeError } = await supabase
     .from("daily_challenges")
@@ -319,12 +342,17 @@ async function loadOwnedChallenge(ctx: Ctx, challengeId: string) {
 
 export async function submitSentences(
   ctx: Ctx,
-  input: { challengeId: string; sentences: { text: string; typingDurationMs: number }[] },
+  input: {
+    challengeId: string;
+    sentences: { text: string; typingDurationMs: number }[];
+    prefixWord?: string | undefined;
+    prefixWordMeaning?: string | undefined;
+  },
 ) {
   const challenge = await loadOwnedChallenge(ctx, input.challengeId);
   const texts = input.sentences.map((s) => s.text.trim());
   if (texts.length !== SCORING_CONFIG.sentenceCount || texts.some((t) => t.length < 8))
-    fail("Please write all three sentences before submitting.");
+    fail(`Please write all ${SCORING_CONFIG.sentenceCount} sentences before submitting.`);
 
   const normalized = texts.map((t) => t.toLowerCase().replace(/[^a-z ]/g, "").trim());
   if (new Set(normalized).size !== normalized.length)
@@ -338,11 +366,33 @@ export async function submitSentences(
     (s) => s.typingDurationMs > 0 && s.typingDurationMs < SCORING_CONFIG.fastTypingThresholdMs,
   );
 
-  const evaluation = await evaluateSentencesWithAI({
-    word: challenge.word,
-    aiExample: challenge.vocabulary_words?.example ?? "",
-    sentences: texts,
-  });
+  const prefix = challenge.vocabulary_words?.prefix as string | null;
+  const prefixMeaning = (challenge.vocabulary_words?.prefix_meaning ?? "") as string;
+  const prefixWord = (input.prefixWord ?? "").trim();
+  const prefixWordMeaning = (input.prefixWordMeaning ?? "").trim();
+  const prefixTaskRequired = Boolean(prefix);
+
+  if (prefixTaskRequired && (prefixWord.length < 3 || prefixWordMeaning.length < 3))
+    fail(`Create one new word using "${prefix}" and give its meaning.`);
+  if (prefixTaskRequired && prefixWord.toLowerCase() === challenge.word.toLowerCase())
+    fail("The new word must be different from the word you learned.");
+
+  const [evaluation, prefixEval] = await Promise.all([
+    evaluateSentencesWithAI({
+      word: challenge.word,
+      aiExample: challenge.vocabulary_words?.example ?? "",
+      sentences: texts,
+    }),
+    prefixTaskRequired
+      ? evaluatePrefixWordWithAI({
+          prefix: prefix as string,
+          prefixMeaning,
+          learnedWord: challenge.word,
+          candidateWord: prefixWord,
+          candidateMeaning: prefixWordMeaning,
+        })
+      : Promise.resolve(null),
+  ]);
 
   const results = evaluation.results.map((r, index) => ({
     ...r,
@@ -351,7 +401,10 @@ export async function submitSentences(
     passed: r.passed && normalizeScore(r.overallScore) >= SCORING_CONFIG.writingPassScore,
   }));
   const overall = Math.round(results.reduce((s, r) => s + r.overallScore, 0) / results.length);
-  const allPassed = results.every((r) => r.passed);
+  const prefixOk =
+    !prefixEval ||
+    (prefixEval.isRealWord && prefixEval.usesPrefix && prefixEval.meaningCorrect);
+  const allPassed = results.every((r) => r.passed) && prefixOk;
 
   await ctx.supabase.from("sentence_submissions").insert(
     results.map((r, i) => ({
@@ -369,7 +422,13 @@ export async function submitSentences(
   if (allPassed) {
     await ctx.supabase
       .from("daily_challenges")
-      .update({ writing_score: overall, stage: "speak" })
+      .update({
+        writing_score: overall,
+        stage: "speak",
+        ...(prefixTaskRequired
+          ? { prefix_word: prefixWord, prefix_word_meaning: prefixWordMeaning }
+          : {}),
+      })
       .eq("id", challenge.id)
       .eq("user_id", ctx.userId);
   }
@@ -380,6 +439,18 @@ export async function submitSentences(
     passed: allPassed,
     summary: evaluation.summary,
     needsAuthorshipCheck: suspiciouslyFast,
+    prefix,
+    prefixResult: prefixEval
+      ? {
+          word: prefixWord,
+          passed: prefixOk,
+          score: normalizeScore(prefixEval.score),
+          isRealWord: prefixEval.isRealWord,
+          usesPrefix: prefixEval.usesPrefix,
+          meaningCorrect: prefixEval.meaningCorrect,
+          feedback: prefixEval.feedback,
+        }
+      : null,
   };
 }
 

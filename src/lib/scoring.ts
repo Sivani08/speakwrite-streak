@@ -1,7 +1,7 @@
 // Configurable scoring / passing rules (shared by client and server).
 export const SCORING_CONFIG = {
-  writingPassScore: 80,
-  sentenceCount: 3,
+  writingPassScore: 60,
+  sentenceCount: 2,
   weights: { writing: 0.4, speaking: 0.4, recall: 0.2 },
   sentenceWeights: {
     usage: 0.3,

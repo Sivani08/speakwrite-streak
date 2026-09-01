@@ -10,7 +10,7 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "14.15"
+    PostgrestVersion: "14.5"
   }
   public: {
     Tables: {
@@ -54,6 +54,8 @@ export type Database = {
           created_at: string
           id: string
           overall_score: number | null
+          prefix_word: string | null
+          prefix_word_meaning: string | null
           recall_score: number | null
           speaking_score: number | null
           stage: string
@@ -70,6 +72,8 @@ export type Database = {
           created_at?: string
           id?: string
           overall_score?: number | null
+          prefix_word?: string | null
+          prefix_word_meaning?: string | null
           recall_score?: number | null
           speaking_score?: number | null
           stage?: string
@@ -86,6 +90,8 @@ export type Database = {
           created_at?: string
           id?: string
           overall_score?: number | null
+          prefix_word?: string | null
+          prefix_word_meaning?: string | null
           recall_score?: number | null
           speaking_score?: number | null
           stage?: string
@@ -394,6 +400,9 @@ export type Database = {
           id: string
           part_of_speech: string | null
           prefix: string | null
+          prefix_example_meaning: string | null
+          prefix_example_word: string | null
+          prefix_meaning: string | null
           pronunciation: string | null
           root: string | null
           simple_meaning: string | null
@@ -411,6 +420,9 @@ export type Database = {
           id?: string
           part_of_speech?: string | null
           prefix?: string | null
+          prefix_example_meaning?: string | null
+          prefix_example_word?: string | null
+          prefix_meaning?: string | null
           pronunciation?: string | null
           root?: string | null
           simple_meaning?: string | null
@@ -428,6 +440,9 @@ export type Database = {
           id?: string
           part_of_speech?: string | null
           prefix?: string | null
+          prefix_example_meaning?: string | null
+          prefix_example_word?: string | null
+          prefix_meaning?: string | null
           pronunciation?: string | null
           root?: string | null
           simple_meaning?: string | null
