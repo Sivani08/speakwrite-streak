@@ -341,12 +341,17 @@ async function loadOwnedChallenge(ctx: Ctx, challengeId: string) {
 
 export async function submitSentences(
   ctx: Ctx,
-  input: { challengeId: string; sentences: { text: string; typingDurationMs: number }[] },
+  input: {
+    challengeId: string;
+    sentences: { text: string; typingDurationMs: number }[];
+    prefixWord?: string;
+    prefixWordMeaning?: string;
+  },
 ) {
   const challenge = await loadOwnedChallenge(ctx, input.challengeId);
   const texts = input.sentences.map((s) => s.text.trim());
   if (texts.length !== SCORING_CONFIG.sentenceCount || texts.some((t) => t.length < 8))
-    fail("Please write all three sentences before submitting.");
+    fail(`Please write all ${SCORING_CONFIG.sentenceCount} sentences before submitting.`);
 
   const normalized = texts.map((t) => t.toLowerCase().replace(/[^a-z ]/g, "").trim());
   if (new Set(normalized).size !== normalized.length)
