@@ -421,7 +421,13 @@ export async function submitSentences(
   if (allPassed) {
     await ctx.supabase
       .from("daily_challenges")
-      .update({ writing_score: overall, stage: "speak" })
+      .update({
+        writing_score: overall,
+        stage: "speak",
+        ...(prefixTaskRequired
+          ? { prefix_word: prefixWord, prefix_word_meaning: prefixWordMeaning }
+          : {}),
+      })
       .eq("id", challenge.id)
       .eq("user_id", ctx.userId);
   }
@@ -432,6 +438,18 @@ export async function submitSentences(
     passed: allPassed,
     summary: evaluation.summary,
     needsAuthorshipCheck: suspiciouslyFast,
+    prefix,
+    prefixResult: prefixEval
+      ? {
+          word: prefixWord,
+          passed: prefixOk,
+          score: normalizeScore(prefixEval.score),
+          isRealWord: prefixEval.isRealWord,
+          usesPrefix: prefixEval.usesPrefix,
+          meaningCorrect: prefixEval.meaningCorrect,
+          feedback: prefixEval.feedback,
+        }
+      : null,
   };
 }
 
