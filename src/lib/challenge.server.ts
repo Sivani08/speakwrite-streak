@@ -345,8 +345,8 @@ export async function submitSentences(
   input: {
     challengeId: string;
     sentences: { text: string; typingDurationMs: number }[];
-    prefixWord?: string;
-    prefixWordMeaning?: string;
+    prefixWord?: string | undefined;
+    prefixWordMeaning?: string | undefined;
   },
 ) {
   const challenge = await loadOwnedChallenge(ctx, input.challengeId);
