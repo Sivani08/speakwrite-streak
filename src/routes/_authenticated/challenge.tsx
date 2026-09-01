@@ -334,12 +334,29 @@ function AnnotatedSentence({ text, errors }: { text: string; errors: SentenceErr
 }
 
 function WriteStep({ data, onDone }: { data: ChallengeData; onDone: () => void }) {
-  const [values, setValues] = useState(["", "", ""]);
-  const startedAt = useRef<number[]>([0, 0, 0]);
+  const count = SCORING_CONFIG.sentenceCount;
+  const prefix = data.word?.prefix as string | null;
+  const [values, setValues] = useState<string[]>(() => Array.from({ length: count }, () => ""));
+  const [prefixWord, setPrefixWord] = useState("");
+  const [prefixWordMeaning, setPrefixWordMeaning] = useState("");
+  const startedAt = useRef<number[]>(Array.from({ length: count }, () => 0));
   const evaluate = useServerFn(evaluateSentences);
+  const [submitted, setSubmitted] = useState<string[]>([]);
   const [results, setResults] = useState<
-    { sentenceNumber: number; overallScore: number; passed: boolean; feedback: string }[]
+    {
+      sentenceNumber: number;
+      overallScore: number;
+      passed: boolean;
+      feedback: string;
+      errors?: SentenceError[];
+      suggestions?: string[];
+    }[]
   >([]);
+  const [prefixResult, setPrefixResult] = useState<null | {
+    passed: boolean;
+    score: number;
+    feedback: string;
+  }>(null);
   const [summary, setSummary] = useState<string | null>(null);
 
   const mutation = useMutation({
@@ -353,33 +370,44 @@ function WriteStep({ data, onDone }: { data: ChallengeData; onDone: () => void }
               ? Date.now() - (startedAt.current[index] ?? 0)
               : 0,
           })),
+          prefixWord: prefixWord.trim(),
+          prefixWordMeaning: prefixWordMeaning.trim(),
         },
       }),
     onSuccess: (result) => {
+      setSubmitted(values.map((v) => v.trim()));
       setResults(result.results as never);
+      setPrefixResult((result.prefixResult ?? null) as never);
       setSummary(result.summary);
       if (result.passed) {
         toast.success(`Writing passed with ${result.overallScore}% — time to speak!`);
         onDone();
       } else {
-        toast.error("Some sentences need work. Read the feedback and retry.");
+        toast.error("Some answers need work. Read the feedback and retry.");
       }
     },
     onError: (error: Error) => toast.error(error.message || "Evaluation failed. Try again."),
   });
 
+  const prefixIncomplete = Boolean(
+    prefix && (prefixWord.trim().length < 3 || prefixWordMeaning.trim().length < 3),
+  );
+
   return (
     <Card className="shadow-card">
       <CardHeader>
-        <CardTitle>Write 3 original sentences using "{data.challenge.word}"</CardTitle>
+        <CardTitle>
+          Write {count} original sentences using "{data.challenge.word}"
+        </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         <p className="text-muted-foreground text-sm">
-          Each sentence needs at least {SCORING_CONFIG.writingPassScore}% to pass. Don't reuse the
-          example sentence.
+          Each sentence needs at least {SCORING_CONFIG.writingPassScore}% to pass. Simple sentences
+          are fine — only real grammar, spelling and usage mistakes cost points.
         </p>
         {values.map((value, index) => {
           const result = results.find((r) => r.sentenceNumber === index + 1);
+          const errors = result?.errors ?? [];
           return (
             <div key={index} className="space-y-1.5">
               <Label htmlFor={`sentence-${index}`}>Sentence {index + 1}</Label>
@@ -402,19 +430,73 @@ function WriteStep({ data, onDone }: { data: ChallengeData; onDone: () => void }
                 placeholder={`Use "${data.challenge.word}" naturally…`}
               />
 
+              {result && errors.length > 0 && (
+                <AnnotatedSentence text={submitted[index] ?? value} errors={errors} />
+              )}
               {result && (
                 <p className={result.passed ? "text-success text-sm" : "text-destructive text-sm"}>
-                  {result.passed ? "✓" : "⚠️"} {result.overallScore}% — {result.feedback}
+                  {result.passed ? `✓ Correct — ${result.overallScore}%` : `⚠️ ${result.overallScore}% — ${result.feedback}`}
                 </p>
               )}
+              {result?.suggestions?.length ? (
+                <p className="text-muted-foreground text-xs">
+                  Optional idea: {result.suggestions[0]}
+                </p>
+              ) : null}
             </div>
           );
         })}
+
+        {prefix && (
+          <div className="border-primary bg-primary/5 space-y-3 rounded-xl border-l-4 p-3">
+            <p className="text-sm font-medium">
+              Now create ONE new real English word using the prefix "{prefix}" and give its meaning.
+            </p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="prefix-word">New word</Label>
+                <Input
+                  id="prefix-word"
+                  value={prefixWord}
+                  onChange={(event) => setPrefixWord(event.target.value)}
+                  onPaste={blockClipboard}
+                  onCopy={blockClipboard}
+                  onCut={blockClipboard}
+                  placeholder={`${prefix}…`}
+                  autoComplete="off"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="prefix-meaning">Its meaning</Label>
+                <Input
+                  id="prefix-meaning"
+                  value={prefixWordMeaning}
+                  onChange={(event) => setPrefixWordMeaning(event.target.value)}
+                  onPaste={blockClipboard}
+                  onCopy={blockClipboard}
+                  onCut={blockClipboard}
+                  placeholder="What does it mean?"
+                  autoComplete="off"
+                />
+              </div>
+            </div>
+            {prefixResult && (
+              <p
+                className={prefixResult.passed ? "text-success text-sm" : "text-destructive text-sm"}
+              >
+                {prefixResult.passed ? "✓ Correct" : "⚠️"} {prefixResult.feedback}
+              </p>
+            )}
+          </div>
+        )}
+
         {summary && <p className="bg-secondary rounded-xl p-3 text-sm">{summary}</p>}
         <Button
           size="lg"
           onClick={() => mutation.mutate()}
-          disabled={mutation.isPending || values.some((v) => v.trim().length < 8)}
+          disabled={
+            mutation.isPending || values.some((v) => v.trim().length < 8) || prefixIncomplete
+          }
         >
           {mutation.isPending ? (
             <>
