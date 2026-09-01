@@ -268,7 +268,26 @@ export async function startChallenge(ctx: Ctx, input: { word: string; today: str
     } else {
       vocab = inserted;
     }
+  } else if (vocab.prefix_meaning == null) {
+    // Older cached words were stored before prefix teaching existed — top them up.
+    const analysis = await analyzeWordWithAI(word);
+    if (analysis.isEnglishWord && analysis.breakdownAvailable) {
+      const { data: updated } = await supabase
+        .from("vocabulary_words")
+        .update({
+          breakdown_available: true,
+          prefix: analysis.prefix,
+          prefix_meaning: analysis.prefixMeaning,
+          prefix_example_word: analysis.prefixExampleWord,
+          prefix_example_meaning: analysis.prefixExampleMeaning,
+        })
+        .eq("id", vocab.id)
+        .select("*")
+        .single();
+      if (updated) vocab = updated;
+    }
   }
+
 
   const { data: challenge, error: challengeError } = await supabase
     .from("daily_challenges")
