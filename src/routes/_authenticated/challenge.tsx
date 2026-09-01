@@ -279,6 +279,60 @@ function LearnStep({ data, onNext }: { data: ChallengeData; onNext: () => void }
 
 /* --------------------------------- write --------------------------------- */
 
+type SentenceError = {
+  phrase: string;
+  correction: string;
+  explanation: string;
+  type: string;
+};
+
+/** Renders the learner's sentence, wavy-underlining only the flagged phrases. */
+function AnnotatedSentence({ text, errors }: { text: string; errors: SentenceError[] }) {
+  const parts: Array<{ text: string; error?: SentenceError }> = [];
+  let cursor = 0;
+  const lower = text.toLowerCase();
+  const found = errors
+    .map((error) => ({ error, index: lower.indexOf(error.phrase.trim().toLowerCase()) }))
+    .filter((item) => item.index >= 0 && item.error.phrase.trim().length > 0)
+    .sort((a, b) => a.index - b.index);
+
+  for (const { error, index } of found) {
+    if (index < cursor) continue;
+    if (index > cursor) parts.push({ text: text.slice(cursor, index) });
+    const end = index + error.phrase.trim().length;
+    parts.push({ text: text.slice(index, end), error });
+    cursor = end;
+  }
+  if (cursor < text.length) parts.push({ text: text.slice(cursor) });
+
+  return (
+    <p className="bg-secondary rounded-xl p-3 text-sm leading-7">
+      {parts.map((part, i) =>
+        part.error ? (
+          <span
+            key={i}
+            tabIndex={0}
+            role="button"
+            title={`${part.error.type}: ${part.error.correction} — ${part.error.explanation}`}
+            className="group text-destructive relative cursor-help decoration-wavy decoration-2 underline-offset-4"
+            style={{ textDecorationLine: "underline", textDecorationColor: "currentColor" }}
+          >
+            {part.text}
+            <span className="bg-popover text-popover-foreground pointer-events-none absolute bottom-full left-0 z-20 mb-1 hidden w-64 rounded-lg border p-2 text-xs shadow-lg group-hover:block group-focus:block">
+              <strong className="capitalize">{part.error.type}</strong>: “{part.error.phrase}” →{" "}
+              <strong>{part.error.correction}</strong>
+              <br />
+              {part.error.explanation}
+            </span>
+          </span>
+        ) : (
+          <span key={i}>{part.text}</span>
+        ),
+      )}
+    </p>
+  );
+}
+
 function WriteStep({ data, onDone }: { data: ChallengeData; onDone: () => void }) {
   const [values, setValues] = useState(["", "", ""]);
   const startedAt = useRef<number[]>([0, 0, 0]);
