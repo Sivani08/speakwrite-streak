@@ -365,11 +365,33 @@ export async function submitSentences(
     (s) => s.typingDurationMs > 0 && s.typingDurationMs < SCORING_CONFIG.fastTypingThresholdMs,
   );
 
-  const evaluation = await evaluateSentencesWithAI({
-    word: challenge.word,
-    aiExample: challenge.vocabulary_words?.example ?? "",
-    sentences: texts,
-  });
+  const prefix = challenge.vocabulary_words?.prefix as string | null;
+  const prefixMeaning = (challenge.vocabulary_words?.prefix_meaning ?? "") as string;
+  const prefixWord = (input.prefixWord ?? "").trim();
+  const prefixWordMeaning = (input.prefixWordMeaning ?? "").trim();
+  const prefixTaskRequired = Boolean(prefix);
+
+  if (prefixTaskRequired && (prefixWord.length < 3 || prefixWordMeaning.length < 3))
+    fail(`Create one new word using "${prefix}" and give its meaning.`);
+  if (prefixTaskRequired && prefixWord.toLowerCase() === challenge.word.toLowerCase())
+    fail("The new word must be different from the word you learned.");
+
+  const [evaluation, prefixEval] = await Promise.all([
+    evaluateSentencesWithAI({
+      word: challenge.word,
+      aiExample: challenge.vocabulary_words?.example ?? "",
+      sentences: texts,
+    }),
+    prefixTaskRequired
+      ? evaluatePrefixWordWithAI({
+          prefix: prefix as string,
+          prefixMeaning,
+          learnedWord: challenge.word,
+          candidateWord: prefixWord,
+          candidateMeaning: prefixWordMeaning,
+        })
+      : Promise.resolve(null),
+  ]);
 
   const results = evaluation.results.map((r, index) => ({
     ...r,
@@ -378,7 +400,10 @@ export async function submitSentences(
     passed: r.passed && normalizeScore(r.overallScore) >= SCORING_CONFIG.writingPassScore,
   }));
   const overall = Math.round(results.reduce((s, r) => s + r.overallScore, 0) / results.length);
-  const allPassed = results.every((r) => r.passed);
+  const prefixOk =
+    !prefixEval ||
+    (prefixEval.isRealWord && prefixEval.usesPrefix && prefixEval.meaningCorrect);
+  const allPassed = results.every((r) => r.passed) && prefixOk;
 
   await ctx.supabase.from("sentence_submissions").insert(
     results.map((r, i) => ({
