@@ -6,6 +6,7 @@ import {
   evaluateMeaningWithAI,
 
   evaluateSentencesWithAI,
+  evaluatePrefixWordWithAI,
   evaluateSpeechWithAI,
   transcribeAudio,
 } from "./ai.server";
