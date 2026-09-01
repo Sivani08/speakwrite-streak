@@ -43,8 +43,9 @@ export const wordAnalysisSchema = z.object({
   detailedMeaning: z.string(),
   breakdownAvailable: z.boolean(),
   prefix: z.string().nullable(),
-  root: z.string().nullable(),
-  suffix: z.string().nullable(),
+  prefixMeaning: z.string().nullable(),
+  prefixExampleWord: z.string().nullable(),
+  prefixExampleMeaning: z.string().nullable(),
   example: z.string(),
   synonyms: z.array(z.string()),
   antonyms: z.array(z.string()),
@@ -57,12 +58,46 @@ export function analyzeWordWithAI(word: string) {
     wordAnalysisSchema,
     [
       "You are a precise English lexicographer for a vocabulary learning app.",
-      "Return structured data only. Never invent morphology: set breakdownAvailable to false and prefix/root/suffix to null unless the word has a genuinely reliable prefix/root/suffix analysis.",
+      "Teach PREFIXES ONLY. Never analyse roots or suffixes.",
+      "If the word begins with a genuine, standard English prefix (e.g. re-, un-, pre-, dis-, mis-, sub-, inter-, trans-, over-, under-, non-, anti-, co-, ex-, semi-, micro-, mono-, bi-, auto-, tele-), set breakdownAvailable true, prefix to that prefix (written like 'pre-'), prefixMeaning to its accurate linguistic meaning (e.g. 'before, in advance'), prefixExampleWord to a DIFFERENT real English word using the same prefix, and prefixExampleMeaning to that word's short meaning.",
+      "If the word has no genuine prefix, set breakdownAvailable false and prefix, prefixMeaning, prefixExampleWord, prefixExampleMeaning all to null. Never invent a prefix or a prefix meaning.",
       "pronunciation must be a simple readable respelling like 'meh-TIK-yuh-lus'.",
       "difficulty must be exactly one of: beginner, intermediate, advanced.",
-      "If the input is not a real English word (gibberish, misspelling, or not English), set isEnglishWord to false and leave the other fields as empty strings or empty arrays.",
+      "If the input is not a real English word (gibberish, misspelling, or not English), set isEnglishWord to false and leave the other fields as empty strings, empty arrays or null.",
     ].join(" "),
     `Analyze this word: "${word}"`,
+  );
+}
+
+/* --------------------------- Prefix word validation ------------------------- */
+
+export const prefixWordSchema = z.object({
+  isRealWord: z.boolean(),
+  usesPrefix: z.boolean(),
+  meaningCorrect: z.boolean(),
+  score: z.number(),
+  feedback: z.string(),
+});
+export type PrefixWordEvaluation = z.infer<typeof prefixWordSchema>;
+
+export function evaluatePrefixWordWithAI(input: {
+  prefix: string;
+  prefixMeaning: string;
+  learnedWord: string;
+  candidateWord: string;
+  candidateMeaning: string;
+}) {
+  return generateStructured(
+    prefixWordSchema,
+    [
+      "You validate a learner's new word built from a taught English prefix.",
+      "isRealWord: true only if candidateWord is a real, standard English word found in dictionaries. Reject invented, misspelled or nonsense words.",
+      "usesPrefix: true only if candidateWord genuinely begins with the given prefix used as that prefix, and is different from the learned word.",
+      "meaningCorrect: true if the learner's meaning captures the real meaning of candidateWord; accept simple wording.",
+      "score is 100 when all three are true, 50 when the word is real and uses the prefix but the meaning is off, and 0 otherwise.",
+      "feedback is one short, encouraging sentence naming exactly what is wrong when something is wrong.",
+    ].join(" "),
+    JSON.stringify(input),
   );
 }
 
