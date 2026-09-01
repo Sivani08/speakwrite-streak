@@ -238,6 +238,22 @@ function LearnStep({ data, onNext }: { data: ChallengeData; onNext: () => void }
           <span className="text-muted-foreground">Example: </span>
           <span className="italic">{word?.example}</span>
         </p>
+        {word?.prefix && (
+          <div className="border-primary bg-primary/5 space-y-2 rounded-xl border-l-4 p-3">
+            <p className="text-muted-foreground text-xs tracking-wide uppercase">Prefix</p>
+            <p className="text-base">
+              <span className="font-display font-semibold">{word.prefix}</span>
+              {word.prefix_meaning ? ` — ${word.prefix_meaning}` : ""}
+            </p>
+            {word.prefix_example_word && (
+              <p>
+                <span className="text-muted-foreground">Another word with {word.prefix} </span>
+                <span className="font-medium">{word.prefix_example_word}</span>
+                {word.prefix_example_meaning ? ` — ${word.prefix_example_meaning}` : ""}
+              </p>
+            )}
+          </div>
+        )}
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="bg-secondary rounded-xl p-3">
             <p className="text-muted-foreground text-xs uppercase">Synonyms</p>
