@@ -116,7 +116,15 @@ export const sentenceEvalSchema = z.object({
       overallScore: z.number(),
       passed: z.boolean(),
       feedback: z.string(),
-      errors: z.array(z.string()),
+      errors: z.array(
+        z.object({
+          phrase: z.string(),
+          correction: z.string(),
+          explanation: z.string(),
+          type: z.string(),
+        }),
+      ),
+      suggestions: z.array(z.string()),
     }),
   ),
   overallScore: z.number(),
@@ -130,16 +138,18 @@ export function evaluateSentencesWithAI(input: {
   aiExample: string;
   sentences: string[];
 }) {
-  const w = SCORING_CONFIG.sentenceWeights;
   return generateStructured(
     sentenceEvalSchema,
     [
-      "You are a supportive but rigorous English writing evaluator.",
-      `Score each sentence 0-100 using these weights: vocabulary usage ${w.usage * 100}%, grammar ${w.grammar * 100}%, context ${w.context * 100}%, sentence structure ${w.structure * 100}%, naturalness ${w.naturalness * 100}%.`,
-      `A sentence passes when it contains the target word, is grammatically meaningful, and scores at least ${SCORING_CONFIG.writingPassScore}.`,
-      "Accept correct sentences even if you would phrase them differently — style preferences are not errors.",
-      "Penalise a sentence heavily only if the target word is missing, misused, or the sentence copies the AI example almost word for word.",
-      "Feedback must teach: name the issue and how to think about fixing it, but never rewrite the sentence for the learner.",
+      "You are an accurate English grammar checker for a vocabulary app.",
+      "Check ONLY genuine errors: grammar, spelling, punctuation, broken sentence structure, and incorrect use of the target vocabulary word.",
+      "NEVER penalise a sentence for being short, simple, generic, unsophisticated, or different from the example sentence. Simple correct sentences must score 100.",
+      "Style or 'more natural' rewrites are optional suggestions only: put them in suggestions and NEVER let them reduce the score or appear in errors.",
+      "errors contains ONE entry per genuine mistake: phrase must be the EXACT substring of the learner's sentence that is wrong (copied character for character, no added words), correction is the fixed form of just that phrase, explanation is one short sentence, type is one of grammar, spelling, punctuation, structure, usage.",
+      "If a sentence has no genuine errors, errors must be an empty array and overallScore must be 100.",
+      "Deduct roughly 15 points per genuine error, and score 30 or lower only when the target word is missing or clearly misused.",
+      `A sentence passes when it contains the target word and scores at least ${SCORING_CONFIG.writingPassScore}.`,
+      "Never rewrite the whole sentence for the learner.",
       "overallScore is the average of the sentence scores. passed is true only when every sentence passes.",
     ].join(" "),
     JSON.stringify({
