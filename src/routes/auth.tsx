@@ -66,7 +66,7 @@ function AuthPage() {
     setLoading(true);
     try {
       if (isSignup) {
-        const { error } = await supabase.auth.signUp({
+        const { data, error } = await supabase.auth.signUp({
           email: email.trim(),
           password,
           options: {
@@ -75,6 +75,12 @@ function AuthPage() {
           },
         });
         if (error) throw error;
+        // An existing email returns a user with no identities (obfuscated response).
+        if (data.user && data.user.identities?.length === 0) {
+          toast.error("An account with this email already exists. Log in or reset your password.");
+          setIsSignup(false);
+          return;
+        }
         const { data: session } = await supabase.auth.getSession();
         if (session.session) {
           toast.success("Welcome! Your first challenge is waiting.");
@@ -88,11 +94,35 @@ function AuthPage() {
           email: email.trim(),
           password,
         });
-        if (error) throw error;
+        if (error) {
+          if (error.message.toLowerCase().includes("invalid login credentials")) {
+            throw new Error("Incorrect email or password. Forgot it? Use “Forgot password” below.");
+          }
+          throw error;
+        }
         navigate({ to: "/dashboard" });
       }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Something went wrong. Try again.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function onForgotPassword() {
+    if (!email.trim()) {
+      toast.error("Enter your email above first, then click “Forgot password”.");
+      return;
+    }
+    setLoading(true);
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+        redirectTo: `${window.location.origin}/reset-password`,
+      });
+      if (error) throw error;
+      toast.success("Password reset link sent. Check your inbox.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not send reset email.");
     } finally {
       setLoading(false);
     }
@@ -181,6 +211,16 @@ function AuthPage() {
                 {loading && <Loader2 className="size-4 animate-spin" aria-hidden />}
                 {isSignup ? "Start Your Streak" : "Log in"}
               </Button>
+              {!isSignup && (
+                <button
+                  type="button"
+                  className="text-muted-foreground hover:text-primary block w-full text-center text-sm underline-offset-4 hover:underline"
+                  onClick={onForgotPassword}
+                  disabled={loading}
+                >
+                  Forgot password?
+                </button>
+              )}
             </form>
 
             <div className="flex items-center gap-3">
