@@ -211,6 +211,16 @@ function AuthPage() {
                 {loading && <Loader2 className="size-4 animate-spin" aria-hidden />}
                 {isSignup ? "Start Your Streak" : "Log in"}
               </Button>
+              {!isSignup && (
+                <button
+                  type="button"
+                  className="text-muted-foreground hover:text-primary block w-full text-center text-sm underline-offset-4 hover:underline"
+                  onClick={onForgotPassword}
+                  disabled={loading}
+                >
+                  Forgot password?
+                </button>
+              )}
             </form>
 
             <div className="flex items-center gap-3">
