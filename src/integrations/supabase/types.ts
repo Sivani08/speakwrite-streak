@@ -407,6 +407,9 @@ export type Database = {
           root: string | null
           simple_meaning: string | null
           suffix: string | null
+          suffix_example_meaning: string | null
+          suffix_example_word: string | null
+          suffix_meaning: string | null
           synonyms: Json
           word: string
         }
@@ -427,6 +430,9 @@ export type Database = {
           root?: string | null
           simple_meaning?: string | null
           suffix?: string | null
+          suffix_example_meaning?: string | null
+          suffix_example_word?: string | null
+          suffix_meaning?: string | null
           synonyms?: Json
           word: string
         }
@@ -447,6 +453,9 @@ export type Database = {
           root?: string | null
           simple_meaning?: string | null
           suffix?: string | null
+          suffix_example_meaning?: string | null
+          suffix_example_word?: string | null
+          suffix_meaning?: string | null
           synonyms?: Json
           word?: string
         }
