@@ -143,7 +143,10 @@ function AuthPage() {
     try {
       const { error } = await supabase.auth.signInWithOtp({
         email: email.trim().toLowerCase(),
-        options: { emailRedirectTo: `${window.location.origin}/auth?mode=login` },
+        options: {
+          emailRedirectTo: `${window.location.origin}/auth?mode=login`,
+          shouldCreateUser: false,
+        },
       });
       if (error) throw error;
       toast.success("Secure login link sent. Open it from your inbox.");
