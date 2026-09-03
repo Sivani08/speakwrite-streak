@@ -23,17 +23,20 @@ export const Route = createFileRoute("/reset-password")({
 
 function ResetPasswordPage() {
   const navigate = useNavigate();
-  const [ready, setReady] = useState(false);
+  const [ready, setReady] = useState(() => {
+    if (typeof window === "undefined") return false;
+    const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+    const search = new URLSearchParams(window.location.search);
+    return hash.get("type") === "recovery" || search.get("type") === "recovery";
+  });
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     const { data } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === "PASSWORD_RECOVERY" || session) setReady(true);
-    });
-    supabase.auth.getSession().then(({ data: s }) => {
-      if (s.session) setReady(true);
+      if (event === "PASSWORD_RECOVERY") setReady(true);
+      if (event === "SIGNED_OUT") setReady(false);
     });
     return () => data.subscription.unsubscribe();
   }, []);

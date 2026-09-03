@@ -39,9 +39,27 @@ function AuthPage() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      if (data.session) navigate({ to: "/dashboard" });
+    const isRecoveryCallback = () => {
+      const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+      const search = new URLSearchParams(window.location.search);
+      return hash.get("type") === "recovery" || search.get("type") === "recovery";
+    };
+
+    const { data: listener } = supabase.auth.onAuthStateChange((event) => {
+      if (event === "PASSWORD_RECOVERY") {
+        navigate({ to: "/reset-password", replace: true });
+      }
     });
+
+    supabase.auth.getSession().then(({ data }) => {
+      if (!data.session) return;
+      navigate({
+        to: isRecoveryCallback() ? "/reset-password" : "/dashboard",
+        replace: true,
+      });
+    });
+
+    return () => listener.subscription.unsubscribe();
   }, [navigate]);
 
   async function onSubmit(event: React.FormEvent) {
