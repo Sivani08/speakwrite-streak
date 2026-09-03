@@ -65,12 +65,13 @@ function AuthPage() {
 
     setLoading(true);
     try {
+      const normalizedEmail = email.trim().toLowerCase();
       if (isSignup) {
         const { data, error } = await supabase.auth.signUp({
-          email: email.trim(),
+          email: normalizedEmail,
           password,
           options: {
-            emailRedirectTo: `${window.location.origin}/dashboard`,
+            emailRedirectTo: `${window.location.origin}/auth?mode=login`,
             data: { full_name: fullName.trim(), timezone: localTimezone() },
           },
         });
@@ -91,7 +92,7 @@ function AuthPage() {
         }
       } else {
         const { error } = await supabase.auth.signInWithPassword({
-          email: email.trim(),
+          email: normalizedEmail,
           password,
         });
         if (error) {
@@ -99,6 +100,11 @@ function AuthPage() {
             throw new Error("Incorrect email or password. Forgot it? Use “Forgot password” below.");
           }
           throw error;
+        }
+        const { data: verified, error: verificationError } = await supabase.auth.getUser();
+        if (verificationError || !verified.user) {
+          await supabase.auth.signOut();
+          throw new Error("Your login could not be verified. Please try the email link below.");
         }
         navigate({ to: "/dashboard" });
       }
@@ -116,13 +122,33 @@ function AuthPage() {
     }
     setLoading(true);
     try {
-      const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+      const { error } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
         redirectTo: `${window.location.origin}/reset-password`,
       });
       if (error) throw error;
       toast.success("Password reset link sent. Check your inbox.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not send reset email.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function onEmailLink() {
+    if (!email.trim()) {
+      toast.error("Enter your email above first.");
+      return;
+    }
+    setLoading(true);
+    try {
+      const { error } = await supabase.auth.signInWithOtp({
+        email: email.trim().toLowerCase(),
+        options: { emailRedirectTo: `${window.location.origin}/auth?mode=login` },
+      });
+      if (error) throw error;
+      toast.success("Secure login link sent. Open it from your inbox.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not send the login link.");
     } finally {
       setLoading(false);
     }
@@ -212,14 +238,14 @@ function AuthPage() {
                 {isSignup ? "Start Your Streak" : "Log in"}
               </Button>
               {!isSignup && (
-                <button
-                  type="button"
-                  className="text-muted-foreground hover:text-primary block w-full text-center text-sm underline-offset-4 hover:underline"
-                  onClick={onForgotPassword}
-                  disabled={loading}
-                >
-                  Forgot password?
-                </button>
+                <div className="grid grid-cols-2 gap-2">
+                  <Button type="button" variant="ghost" size="sm" onClick={onForgotPassword} disabled={loading}>
+                    Forgot password?
+                  </Button>
+                  <Button type="button" variant="ghost" size="sm" onClick={onEmailLink} disabled={loading}>
+                    Email me a login link
+                  </Button>
+                </div>
               )}
             </form>
 

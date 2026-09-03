@@ -254,6 +254,22 @@ function LearnStep({ data, onNext }: { data: ChallengeData; onNext: () => void }
             )}
           </div>
         )}
+        {word?.suffix && (
+          <div className="border-accent bg-accent/10 space-y-2 rounded-xl border-l-4 p-3">
+            <p className="text-muted-foreground text-xs tracking-wide uppercase">Suffix</p>
+            <p className="text-base">
+              <span className="font-display font-semibold">{word.suffix}</span>
+              {word.suffix_meaning ? ` — ${word.suffix_meaning}` : ""}
+            </p>
+            {word.suffix_example_word && (
+              <p>
+                <span className="text-muted-foreground">Another word with {word.suffix} </span>
+                <span className="font-medium">{word.suffix_example_word}</span>
+                {word.suffix_example_meaning ? ` — ${word.suffix_example_meaning}` : ""}
+              </p>
+            )}
+          </div>
+        )}
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="bg-secondary rounded-xl p-3">
             <p className="text-muted-foreground text-xs uppercase">Synonyms</p>
