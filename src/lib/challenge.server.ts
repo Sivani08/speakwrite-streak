@@ -251,7 +251,10 @@ export async function startChallenge(ctx: Ctx, input: { word: string; today: str
         prefix_example_word: analysis.breakdownAvailable ? analysis.prefixExampleWord : null,
         prefix_example_meaning: analysis.breakdownAvailable ? analysis.prefixExampleMeaning : null,
         root: null,
-        suffix: null,
+        suffix: analysis.breakdownAvailable ? analysis.suffix : null,
+        suffix_meaning: analysis.breakdownAvailable ? analysis.suffixMeaning : null,
+        suffix_example_word: analysis.breakdownAvailable ? analysis.suffixExampleWord : null,
+        suffix_example_meaning: analysis.breakdownAvailable ? analysis.suffixExampleMeaning : null,
         example: analysis.example,
         synonyms: analysis.synonyms,
         antonyms: analysis.antonyms,
@@ -269,8 +272,8 @@ export async function startChallenge(ctx: Ctx, input: { word: string; today: str
     } else {
       vocab = inserted;
     }
-  } else if (vocab.prefix_meaning == null) {
-    // Older cached words were stored before prefix teaching existed — top them up.
+  } else if (vocab.prefix_meaning == null || vocab.suffix_meaning == null) {
+    // Older cached words may be missing affix teaching details — top them up.
     const analysis = await analyzeWordWithAI(word);
     if (analysis.isEnglishWord && analysis.breakdownAvailable) {
       const { data: updated } = await supabase
@@ -281,6 +284,10 @@ export async function startChallenge(ctx: Ctx, input: { word: string; today: str
           prefix_meaning: analysis.prefixMeaning,
           prefix_example_word: analysis.prefixExampleWord,
           prefix_example_meaning: analysis.prefixExampleMeaning,
+          suffix: analysis.suffix,
+          suffix_meaning: analysis.suffixMeaning,
+          suffix_example_word: analysis.suffixExampleWord,
+          suffix_example_meaning: analysis.suffixExampleMeaning,
         })
         .eq("id", vocab.id)
         .select("*")
