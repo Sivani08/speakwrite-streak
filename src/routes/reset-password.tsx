@@ -38,6 +38,9 @@ function ResetPasswordPage() {
       if (event === "PASSWORD_RECOVERY") setReady(true);
       if (event === "SIGNED_OUT") setReady(false);
     });
+    supabase.auth.getSession().then(({ data: current }) => {
+      if (current.session) setReady(true);
+    });
     return () => data.subscription.unsubscribe();
   }, []);
 
