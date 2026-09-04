@@ -7,30 +7,27 @@ import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
-import { useRecorder } from "@/hooks/useRecorder";
 import {
   advanceStage,
-  analyzeSpeech,
-  evaluateRecall,
+  evaluateCreatedWord,
   evaluateSentences,
   fetchTodayChallenge,
+  finishLearningChallenge,
+  proceedToWordTask,
   startTodayChallenge,
 } from "@/lib/challenge.functions";
 import { localToday } from "@/lib/date";
-import { CHALLENGE_STEPS, STEP_LABELS, SCORING_CONFIG } from "@/lib/scoring";
+import {
+  CHALLENGE_STEPS,
+  passesLearningChallenge,
+  SCORING_CONFIG,
+  STEP_LABELS,
+} from "@/lib/scoring";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import {
-  ArrowRight,
-  CheckCircle2,
-  Flame,
-  Loader2,
-  Mic,
-  Square,
-  Volume2,
-} from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { ArrowRight, CheckCircle2, CircleX, Flame, Loader2, Volume2 } from "lucide-react";
+import { useRef, useState } from "react";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/_authenticated/challenge")({
@@ -39,10 +36,10 @@ export const Route = createFileRoute("/_authenticated/challenge")({
       { title: "Daily Challenge — AI Vocabulary Streak" },
       {
         name: "description",
-        content: "Learn, write, speak and recall today's word to earn your streak.",
+        content: "Learn today's word, write two sentences, and create a related English word.",
       },
       { property: "og:title", content: "Daily Challenge — AI Vocabulary Streak" },
-      { property: "og:description", content: "Complete today's 5-step vocabulary challenge." },
+      { property: "og:description", content: "Complete today's two-task vocabulary challenge." },
     ],
   }),
   component: ChallengePage,
@@ -81,18 +78,19 @@ function ChallengePage() {
     );
   }
 
-  const stage = (data.challenge.stage ?? "learn") as Stage;
+  const rawStage = data.challenge.stage ?? "learn";
+  const stage = (rawStage === "recall" ? "speak" : rawStage) as Stage;
   const index = CHALLENGE_STEPS.indexOf(stage);
 
   return (
     <AppShell
       title={data.challenge.word.toUpperCase()}
-      subtitle={`Step ${Math.min(index + 1, 4)} of 4 · ${STEP_LABELS[stage]}`}
+      subtitle={`Step ${Math.max(1, index + 1)} of 4 · ${STEP_LABELS[stage]}`}
     >
       <div className="mb-6">
-        <Progress value={(Math.min(index, 4) / 4) * 100} aria-label="Challenge progress" />
+        <Progress value={(Math.max(index, 0) / 3) * 100} aria-label="Challenge progress" />
         <ol className="text-muted-foreground mt-3 flex flex-wrap gap-4 text-xs font-semibold">
-          {CHALLENGE_STEPS.slice(0, 5).map((step, i) => (
+          {CHALLENGE_STEPS.map((step, i) => (
             <li key={step} className={i <= index ? "text-foreground" : undefined}>
               {i < index ? "✓ " : ""}
               {STEP_LABELS[step]}
@@ -103,8 +101,7 @@ function ChallengePage() {
 
       {stage === "learn" && <LearnStep data={data} onNext={invalidate} />}
       {stage === "write" && <WriteStep data={data} onDone={invalidate} />}
-      {stage === "speak" && <SpeakStep data={data} onDone={invalidate} />}
-      {stage === "recall" && <RecallStep data={data} today={today} onDone={invalidate} />}
+      {stage === "speak" && <WordCreationStep data={data} today={today} onDone={invalidate} />}
       {stage === "complete" && <CompleteStep data={data} />}
     </AppShell>
   );
@@ -192,8 +189,39 @@ function blockClipboard(event: React.ClipboardEvent<HTMLElement>) {
   toast.error("Copy and paste are disabled — type it yourself.");
 }
 
-
 /* --------------------------------- learn --------------------------------- */
+
+function WordPartCard({
+  label,
+  value,
+  meaning,
+  exampleWord,
+  exampleMeaning,
+  className,
+}: {
+  label: "Prefix" | "Root" | "Suffix";
+  value: string | null | undefined;
+  meaning: string | null | undefined;
+  exampleWord: string | null | undefined;
+  exampleMeaning: string | null | undefined;
+  className: string;
+}) {
+  if (!value || !meaning) return null;
+  return (
+    <div className={`space-y-2 rounded-xl border-l-4 p-3 ${className}`}>
+      <p className="text-muted-foreground text-xs tracking-wide uppercase">{label}</p>
+      <p className="text-base">
+        <span className="font-display font-semibold">{value}</span> — {meaning}
+      </p>
+      {exampleWord && exampleMeaning && (
+        <p>
+          <span className="text-muted-foreground">Related real word: </span>
+          <span className="font-medium">{exampleWord}</span> — {exampleMeaning}
+        </p>
+      )}
+    </div>
+  );
+}
 
 function LearnStep({ data, onNext }: { data: ChallengeData; onNext: () => void }) {
   const word = data.word;
@@ -226,50 +254,43 @@ function LearnStep({ data, onNext }: { data: ChallengeData; onNext: () => void }
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4 text-sm">
-        <p className="text-base">
-          <span className="text-muted-foreground">Meaning: </span>
-          {word?.simple_meaning}
-        </p>
         <p>
           <span className="text-muted-foreground">Part of speech: </span>
           {word?.part_of_speech}
+        </p>
+        <p className="text-muted-foreground text-xs tracking-wide uppercase">Word breakdown</p>
+        <WordPartCard
+          label="Prefix"
+          value={word?.prefix}
+          meaning={word?.prefix_meaning}
+          exampleWord={word?.prefix_example_word}
+          exampleMeaning={word?.prefix_example_meaning}
+          className="border-primary bg-primary/5"
+        />
+        <WordPartCard
+          label="Root"
+          value={word?.root}
+          meaning={word?.root_meaning}
+          exampleWord={word?.root_example_word}
+          exampleMeaning={word?.root_example_meaning}
+          className="border-streak bg-streak/5"
+        />
+        <WordPartCard
+          label="Suffix"
+          value={word?.suffix}
+          meaning={word?.suffix_meaning}
+          exampleWord={word?.suffix_example_word}
+          exampleMeaning={word?.suffix_example_meaning}
+          className="border-accent bg-accent/10"
+        />
+        <p className="text-base">
+          <span className="text-muted-foreground">Full meaning: </span>
+          {word?.detailed_meaning || word?.simple_meaning}
         </p>
         <p>
           <span className="text-muted-foreground">Example: </span>
           <span className="italic">{word?.example}</span>
         </p>
-        {word?.prefix && (
-          <div className="border-primary bg-primary/5 space-y-2 rounded-xl border-l-4 p-3">
-            <p className="text-muted-foreground text-xs tracking-wide uppercase">Prefix</p>
-            <p className="text-base">
-              <span className="font-display font-semibold">{word.prefix}</span>
-              {word.prefix_meaning ? ` — ${word.prefix_meaning}` : ""}
-            </p>
-            {word.prefix_example_word && (
-              <p>
-                <span className="text-muted-foreground">Another word with {word.prefix} </span>
-                <span className="font-medium">{word.prefix_example_word}</span>
-                {word.prefix_example_meaning ? ` — ${word.prefix_example_meaning}` : ""}
-              </p>
-            )}
-          </div>
-        )}
-        {word?.suffix && (
-          <div className="border-accent bg-accent/10 space-y-2 rounded-xl border-l-4 p-3">
-            <p className="text-muted-foreground text-xs tracking-wide uppercase">Suffix</p>
-            <p className="text-base">
-              <span className="font-display font-semibold">{word.suffix}</span>
-              {word.suffix_meaning ? ` — ${word.suffix_meaning}` : ""}
-            </p>
-            {word.suffix_example_word && (
-              <p>
-                <span className="text-muted-foreground">Another word with {word.suffix} </span>
-                <span className="font-medium">{word.suffix_example_word}</span>
-                {word.suffix_example_meaning ? ` — ${word.suffix_example_meaning}` : ""}
-              </p>
-            )}
-          </div>
-        )}
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="bg-secondary rounded-xl p-3">
             <p className="text-muted-foreground text-xs uppercase">Synonyms</p>
@@ -286,7 +307,7 @@ function LearnStep({ data, onNext }: { data: ChallengeData; onNext: () => void }
           </p>
         )}
         <Button size="lg" onClick={() => mutation.mutate()} disabled={mutation.isPending}>
-          I've learned it — start writing <ArrowRight className="size-4" aria-hidden />
+          Proceed <ArrowRight className="size-4" aria-hidden />
         </Button>
       </CardContent>
     </Card>
@@ -329,16 +350,17 @@ function AnnotatedSentence({ text, errors }: { text: string; errors: SentenceErr
             key={i}
             tabIndex={0}
             role="button"
-            title={`${part.error.type}: ${part.error.correction} — ${part.error.explanation}`}
+            title={`Error: ${part.error.phrase}\nCorrection: ${part.error.correction}\n${part.error.explanation}`}
             className="group text-destructive relative cursor-help decoration-wavy decoration-2 underline-offset-4"
             style={{ textDecorationLine: "underline", textDecorationColor: "currentColor" }}
           >
             {part.text}
             <span className="bg-popover text-popover-foreground pointer-events-none absolute bottom-full left-0 z-20 mb-1 hidden w-64 rounded-lg border p-2 text-xs shadow-lg group-hover:block group-focus:block">
-              <strong className="capitalize">{part.error.type}</strong>: “{part.error.phrase}” →{" "}
-              <strong>{part.error.correction}</strong>
+              <strong>Error:</strong> “{part.error.phrase}”
               <br />
-              {part.error.explanation}
+              <strong>Correction:</strong> {part.error.correction}
+              <br />
+              <strong>Why:</strong> {part.error.explanation}
             </span>
           </span>
         ) : (
@@ -351,29 +373,29 @@ function AnnotatedSentence({ text, errors }: { text: string; errors: SentenceErr
 
 function WriteStep({ data, onDone }: { data: ChallengeData; onDone: () => void }) {
   const count = SCORING_CONFIG.sentenceCount;
-  const prefix = data.word?.prefix as string | null;
-  const [values, setValues] = useState<string[]>(() => Array.from({ length: count }, () => ""));
-  const [prefixWord, setPrefixWord] = useState("");
-  const [prefixWordMeaning, setPrefixWordMeaning] = useState("");
+  const [values, setValues] = useState<string[]>(() => {
+    const previous = [...(data.sentences ?? [])]
+      .slice(-count)
+      .sort((a, b) => a.sentence_number - b.sentence_number);
+    return Array.from({ length: count }, (_, index) => previous[index]?.sentence_text ?? "");
+  });
   const startedAt = useRef<number[]>(Array.from({ length: count }, () => 0));
   const evaluate = useServerFn(evaluateSentences);
+  const proceed = useServerFn(proceedToWordTask);
   const [submitted, setSubmitted] = useState<string[]>([]);
   const [results, setResults] = useState<
     {
       sentenceNumber: number;
       overallScore: number;
       passed: boolean;
+      correct: boolean;
       feedback: string;
       errors?: SentenceError[];
       suggestions?: string[];
     }[]
   >([]);
-  const [prefixResult, setPrefixResult] = useState<null | {
-    passed: boolean;
-    score: number;
-    feedback: string;
-  }>(null);
   const [summary, setSummary] = useState<string | null>(null);
+  const [validationComplete, setValidationComplete] = useState(false);
 
   const mutation = useMutation({
     mutationFn: () =>
@@ -386,28 +408,25 @@ function WriteStep({ data, onDone }: { data: ChallengeData; onDone: () => void }
               ? Date.now() - (startedAt.current[index] ?? 0)
               : 0,
           })),
-          prefixWord: prefixWord.trim(),
-          prefixWordMeaning: prefixWordMeaning.trim(),
         },
       }),
     onSuccess: (result) => {
       setSubmitted(values.map((v) => v.trim()));
       setResults(result.results as never);
-      setPrefixResult((result.prefixResult ?? null) as never);
       setSummary(result.summary);
-      if (result.passed) {
-        toast.success(`Writing passed with ${result.overallScore}% — time to speak!`);
-        onDone();
-      } else {
-        toast.error("Some answers need work. Read the feedback and retry.");
-      }
+      setValidationComplete(true);
+      toast.success(`Review complete — Task 1 scored ${result.overallScore}%.`);
     },
     onError: (error: Error) => toast.error(error.message || "Evaluation failed. Try again."),
   });
 
-  const prefixIncomplete = Boolean(
-    prefix && (prefixWord.trim().length < 3 || prefixWordMeaning.trim().length < 3),
-  );
+  const proceedMutation = useMutation({
+    mutationFn: () => proceed({ data: { challengeId: data.challenge.id } }),
+    onSuccess: onDone,
+    onError: (error: Error) => toast.error(error.message || "Could not continue."),
+  });
+
+  const inputsComplete = values.every((value) => value.trim().length > 0);
 
   return (
     <Card className="shadow-card">
@@ -418,8 +437,8 @@ function WriteStep({ data, onDone }: { data: ChallengeData; onDone: () => void }
       </CardHeader>
       <CardContent className="space-y-4">
         <p className="text-muted-foreground text-sm">
-          Each sentence needs at least {SCORING_CONFIG.writingPassScore}% to pass. Simple sentences
-          are fine — only real grammar, spelling and usage mistakes cost points.
+          Simple sentences are welcome. Only genuine grammar, spelling, punctuation, structure,
+          usage, or meaning errors reduce the score.
         </p>
         {values.map((value, index) => {
           const result = results.find((r) => r.sentenceNumber === index + 1);
@@ -438,6 +457,9 @@ function WriteStep({ data, onDone }: { data: ChallengeData; onDone: () => void }
                   const next = [...values];
                   next[index] = event.target.value;
                   setValues(next);
+                  setValidationComplete(false);
+                  setResults([]);
+                  setSummary(null);
                 }}
                 onPaste={blockClipboard}
                 onCopy={blockClipboard}
@@ -450,8 +472,10 @@ function WriteStep({ data, onDone }: { data: ChallengeData; onDone: () => void }
                 <AnnotatedSentence text={submitted[index] ?? value} errors={errors} />
               )}
               {result && (
-                <p className={result.passed ? "text-success text-sm" : "text-destructive text-sm"}>
-                  {result.passed ? `✓ Correct — ${result.overallScore}%` : `⚠️ ${result.overallScore}% — ${result.feedback}`}
+                <p className={result.correct ? "text-success text-sm" : "text-destructive text-sm"}>
+                  {result.correct
+                    ? `✓ Correct — ${result.overallScore}%`
+                    : `⚠️ ${result.overallScore}% — ${result.feedback}`}
                 </p>
               )}
               {result?.suggestions?.length ? (
@@ -463,180 +487,60 @@ function WriteStep({ data, onDone }: { data: ChallengeData; onDone: () => void }
           );
         })}
 
-        {prefix && (
-          <div className="border-primary bg-primary/5 space-y-3 rounded-xl border-l-4 p-3">
-            <p className="text-sm font-medium">
-              Now create ONE new real English word using the prefix "{prefix}" and give its meaning.
-            </p>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="space-y-1.5">
-                <Label htmlFor="prefix-word">New word</Label>
-                <Input
-                  id="prefix-word"
-                  value={prefixWord}
-                  onChange={(event) => setPrefixWord(event.target.value)}
-                  onPaste={blockClipboard}
-                  onCopy={blockClipboard}
-                  onCut={blockClipboard}
-                  placeholder={`${prefix}…`}
-                  autoComplete="off"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="prefix-meaning">Its meaning</Label>
-                <Input
-                  id="prefix-meaning"
-                  value={prefixWordMeaning}
-                  onChange={(event) => setPrefixWordMeaning(event.target.value)}
-                  onPaste={blockClipboard}
-                  onCopy={blockClipboard}
-                  onCut={blockClipboard}
-                  placeholder="What does it mean?"
-                  autoComplete="off"
-                />
-              </div>
-            </div>
-            {prefixResult && (
-              <p
-                className={prefixResult.passed ? "text-success text-sm" : "text-destructive text-sm"}
-              >
-                {prefixResult.passed ? "✓ Correct" : "⚠️"} {prefixResult.feedback}
-              </p>
-            )}
-          </div>
-        )}
-
         {summary && <p className="bg-secondary rounded-xl p-3 text-sm">{summary}</p>}
-        <Button
-          size="lg"
-          onClick={() => mutation.mutate()}
-          disabled={
-            mutation.isPending || values.some((v) => v.trim().length < 8) || prefixIncomplete
-          }
-        >
-          {mutation.isPending ? (
-            <>
-              <Loader2 className="size-4 animate-spin" aria-hidden /> AI is reviewing…
-            </>
-          ) : (
-            "Submit sentences"
-          )}
-        </Button>
-      </CardContent>
-    </Card>
-  );
-}
-
-/* --------------------------------- speak --------------------------------- */
-
-function SpeakStep({ data, onDone }: { data: ChallengeData; onDone: () => void }) {
-  const recorder = useRecorder();
-  const analyze = useServerFn(analyzeSpeech);
-  const [result, setResult] = useState<null | {
-    transcript: string;
-    targetWordDetected: boolean;
-    overallScore: number;
-    passed: boolean;
-    feedback: string;
-    pronunciationScore: number;
-    grammarScore: number;
-    usageScore: number;
-    fluencyScore: number;
-  }>(null);
-
-  useEffect(() => {
-    if (recorder.error) toast.error(recorder.error);
-  }, [recorder.error]);
-
-  const mutation = useMutation({
-    mutationFn: (audio: { base64: string; mimeType: string; durationSeconds: number }) =>
-      analyze({
-        data: {
-          challengeId: data.challenge.id,
-          audioBase64: audio.base64,
-          mimeType: audio.mimeType,
-          durationSeconds: audio.durationSeconds,
-        },
-      }),
-    onSuccess: (value) => {
-      setResult(value as never);
-      if (value.passed) {
-        toast.success(`Speaking passed with ${value.overallScore}%!`);
-        onDone();
-      } else {
-        toast.error("Not quite — read the feedback and record again.");
-      }
-    },
-    onError: (error: Error) => toast.error(error.message || "We couldn't analyze that recording."),
-  });
-
-  async function toggle() {
-    if (recorder.recording) {
-      const audio = await recorder.stop();
-      if (audio) mutation.mutate(audio);
-      return;
-    }
-    await recorder.start();
-  }
-
-  return (
-    <Card className="shadow-card">
-      <CardHeader>
-        <CardTitle>Speak one sentence using "{data.challenge.word}"</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-5">
-        <p className="text-muted-foreground text-sm">
-          Press record, say a full sentence out loud, then stop. AI checks pronunciation, grammar,
-          usage and fluency.
-        </p>
-
-        <div className="flex flex-col items-center gap-3 py-4">
+        <div className="flex flex-wrap gap-2">
           <Button
             size="lg"
-            variant={recorder.recording ? "destructive" : "default"}
-            className="size-20 rounded-full"
-            onClick={toggle}
-            disabled={mutation.isPending}
-            aria-label={recorder.recording ? "Stop recording" : "Start recording"}
+            onClick={() => mutation.mutate()}
+            disabled={mutation.isPending || proceedMutation.isPending || !inputsComplete}
           >
-            {recorder.recording ? (
-              <Square className="size-7" aria-hidden />
+            {mutation.isPending ? (
+              <>
+                <Loader2 className="size-4 animate-spin" aria-hidden /> AI is reviewing…
+              </>
             ) : (
-              <Mic className="size-7" aria-hidden />
+              "Check sentences"
             )}
           </Button>
-          <p className="text-muted-foreground text-sm">
-            {mutation.isPending
-              ? "Transcribing and scoring…"
-              : recorder.recording
-                ? `Recording… ${recorder.seconds}s`
-                : "Tap to record"}
-          </p>
+          <Button
+            size="lg"
+            variant="outline"
+            onClick={() => proceedMutation.mutate()}
+            disabled={!validationComplete || mutation.isPending || proceedMutation.isPending}
+          >
+            {proceedMutation.isPending ? (
+              <Loader2 className="size-4 animate-spin" aria-hidden />
+            ) : (
+              <>
+                Proceed <ArrowRight className="size-4" aria-hidden />
+              </>
+            )}
+          </Button>
         </div>
-
-        {result && (
-          <div className="space-y-3">
-            <p className="bg-secondary rounded-xl p-3 text-sm italic">"{result.transcript}"</p>
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              <ScoreBadge label="Pronunciation" value={result.pronunciationScore} />
-              <ScoreBadge label="Grammar" value={result.grammarScore} />
-              <ScoreBadge label="Usage" value={result.usageScore} />
-              <ScoreBadge label="Fluency" value={result.fluencyScore} />
-            </div>
-            <p className="text-sm">
-              {result.passed ? "✓ " : "⚠️ "}
-              {result.feedback}
-            </p>
-          </div>
-        )}
       </CardContent>
     </Card>
   );
 }
 
-/* --------------------------------- recall --------------------------------- */
+/* ------------------------------ word creation ------------------------------ */
 
-function RecallStep({
+type WordPartOption = {
+  type: "prefix" | "root" | "suffix";
+  value: string;
+  meaning: string;
+};
+
+type WordCreationResult = {
+  isRealWord: boolean;
+  usesSelectedPart: boolean;
+  relationshipValid: boolean;
+  meaningCorrect: boolean;
+  passed: boolean;
+  score: number;
+  feedback: string;
+};
+
+function WordCreationStep({
   data,
   today,
   onDone,
@@ -645,87 +549,221 @@ function RecallStep({
   today: string;
   onDone: () => void;
 }) {
-  const [meaning, setMeaning] = useState("");
-  const submit = useServerFn(evaluateRecall);
-  const [feedback, setFeedback] = useState<string | null>(null);
+  const word = data.word ?? {};
+  const parts = (["prefix", "root", "suffix"] as const).flatMap((type) => {
+    const value = word[type];
+    const meaning = word[`${type}_meaning`];
+    return value && meaning ? [{ type, value, meaning } as WordPartOption] : [];
+  });
+  const storedPart = parts.find(
+    (part) =>
+      part.type === data.challenge.created_word_part_type &&
+      part.value === data.challenge.created_word_part,
+  );
+  const [selected, setSelected] = useState<WordPartOption | null>(storedPart ?? parts[0] ?? null);
+  const [createdWord, setCreatedWord] = useState(data.challenge.created_word ?? "");
+  const [meaning, setMeaning] = useState(data.challenge.created_word_meaning ?? "");
+  const [result, setResult] = useState<WordCreationResult | null>(() => {
+    const stored = data.challenge.word_creation_result;
+    return stored && typeof stored === "object" ? (stored as WordCreationResult) : null;
+  });
+  const [validationComplete, setValidationComplete] = useState(
+    data.challenge.word_creation_score != null,
+  );
+  const evaluate = useServerFn(evaluateCreatedWord);
+  const finish = useServerFn(finishLearningChallenge);
+
+  const clearValidation = () => {
+    setResult(null);
+    setValidationComplete(false);
+  };
 
   const mutation = useMutation({
-    mutationFn: () => submit({ data: { challengeId: data.challenge.id, meaning: meaning.trim(), today } }),
-    onSuccess: (result) => {
-      setFeedback(result.feedback);
-      if (result.passed) {
-        toast.success("Challenge complete — streak earned! 🔥");
-        onDone();
-      } else {
-        toast.error("Not quite right — try explaining it again.");
-      }
+    mutationFn: () =>
+      evaluate({
+        data: {
+          challengeId: data.challenge.id,
+          partType: selected!.type,
+          part: selected!.value,
+          word: createdWord.trim(),
+          meaning: meaning.trim(),
+        },
+      }),
+    onSuccess: (value) => {
+      setResult(value as WordCreationResult);
+      setValidationComplete(true);
+      toast.success(`Review complete — Task 2 scored ${value.score}%.`);
     },
-    onError: (error: Error) => toast.error(error.message || "Could not check your answer."),
+    onError: (error: Error) => toast.error(error.message || "Could not validate that word."),
   });
+
+  const finishMutation = useMutation({
+    mutationFn: () => finish({ data: { challengeId: data.challenge.id, today } }),
+    onSuccess: onDone,
+    onError: (error: Error) => toast.error(error.message || "Could not finish the challenge."),
+  });
+
+  const inputsComplete = Boolean(
+    selected && createdWord.trim().length >= 2 && meaning.trim().length >= 3,
+  );
 
   return (
     <Card className="shadow-card">
       <CardHeader>
-        <CardTitle>Recall from memory</CardTitle>
+        <CardTitle>Task 2: Create one real English word</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         <p className="text-muted-foreground text-sm">
-          Without scrolling back: write the meaning of "{data.challenge.word}" in your own words.
+          Choose a genuine word part from “{data.challenge.word}”, then enter a different real
+          English word using that same part and explain its meaning.
         </p>
-        <div className="space-y-1.5">
-          <Label htmlFor="meaning">Meaning</Label>
-          <Textarea
-            id="meaning"
-            rows={3}
-            value={meaning}
-            onChange={(event) => setMeaning(event.target.value)}
-            onPaste={blockClipboard}
-            onCopy={blockClipboard}
-            onCut={blockClipboard}
-            placeholder="It means…"
-            autoComplete="off"
-          />
-        </div>
-        {feedback && <p className="bg-secondary rounded-xl p-3 text-sm">{feedback}</p>}
-        <Button
-          size="lg"
-          onClick={() => mutation.mutate()}
-          disabled={mutation.isPending || meaning.trim().length < 3}
-        >
-          {mutation.isPending ? (
-            <>
-              <Loader2 className="size-4 animate-spin" aria-hidden /> Checking…
-            </>
-          ) : (
-            "Submit meaning"
+
+        <div className="space-y-2">
+          <Label>Word part</Label>
+          <div className="flex flex-wrap gap-2">
+            {parts.map((part) => (
+              <Button
+                key={`${part.type}-${part.value}`}
+                type="button"
+                size="sm"
+                variant={selected?.type === part.type ? "default" : "outline"}
+                onClick={() => {
+                  setSelected(part);
+                  clearValidation();
+                }}
+              >
+                <span className="capitalize">{part.type}</span>: {part.value}
+              </Button>
+            ))}
+          </div>
+          {selected && (
+            <p className="text-muted-foreground text-xs">
+              {selected.value} — {selected.meaning}
+            </p>
           )}
-        </Button>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="space-y-1.5">
+            <Label htmlFor="created-word">New real English word</Label>
+            <Input
+              id="created-word"
+              value={createdWord}
+              onChange={(event) => {
+                setCreatedWord(event.target.value);
+                clearValidation();
+              }}
+              onPaste={blockClipboard}
+              onCopy={blockClipboard}
+              onCut={blockClipboard}
+              placeholder="Enter a different word"
+              autoComplete="off"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="created-word-meaning">Its meaning</Label>
+            <Input
+              id="created-word-meaning"
+              value={meaning}
+              onChange={(event) => {
+                setMeaning(event.target.value);
+                clearValidation();
+              }}
+              onPaste={blockClipboard}
+              onCopy={blockClipboard}
+              onCut={blockClipboard}
+              placeholder="What does it mean?"
+              autoComplete="off"
+            />
+          </div>
+        </div>
+
+        {result && (
+          <div className="bg-secondary space-y-2 rounded-xl p-3 text-sm">
+            <p
+              className={
+                result.passed ? "text-success font-medium" : "text-destructive font-medium"
+              }
+            >
+              {result.passed ? "✓ Correct" : "⚠️ Not valid"} — {result.score}%
+            </p>
+            <p>{result.feedback}</p>
+            <div className="text-muted-foreground grid gap-1 text-xs sm:grid-cols-2">
+              <span>{result.isRealWord ? "✓" : "✕"} Real English word</span>
+              <span>{result.usesSelectedPart ? "✓" : "✕"} Uses the selected part</span>
+              <span>{result.relationshipValid ? "✓" : "✕"} Linguistically valid relationship</span>
+              <span>{result.meaningCorrect ? "✓" : "✕"} Meaning is correct</span>
+            </div>
+          </div>
+        )}
+
+        <div className="flex flex-wrap gap-2">
+          <Button
+            size="lg"
+            onClick={() => mutation.mutate()}
+            disabled={!inputsComplete || mutation.isPending || finishMutation.isPending}
+          >
+            {mutation.isPending ? (
+              <>
+                <Loader2 className="size-4 animate-spin" aria-hidden /> AI is validating…
+              </>
+            ) : (
+              "Validate word"
+            )}
+          </Button>
+          <Button
+            size="lg"
+            variant="outline"
+            onClick={() => finishMutation.mutate()}
+            disabled={!validationComplete || mutation.isPending || finishMutation.isPending}
+          >
+            {finishMutation.isPending ? (
+              <Loader2 className="size-4 animate-spin" aria-hidden />
+            ) : (
+              <>
+                Proceed <ArrowRight className="size-4" aria-hidden />
+              </>
+            )}
+          </Button>
+        </div>
       </CardContent>
     </Card>
   );
 }
 
-
 /* -------------------------------- complete -------------------------------- */
 
 function CompleteStep({ data }: { data: ChallengeData }) {
+  const overallScore = data.challenge.overall_score ?? 0;
+  const passed = passesLearningChallenge(overallScore);
+
   return (
     <Card className="shadow-card mx-auto max-w-2xl text-center">
       <CardHeader>
         <CardTitle className="flex items-center justify-center gap-2">
-          <CheckCircle2 className="text-success size-6" aria-hidden />
-          Today's challenge is complete
+          {passed ? (
+            <CheckCircle2 className="text-success size-6" aria-hidden />
+          ) : (
+            <CircleX className="text-destructive size-6" aria-hidden />
+          )}
+          {passed ? "Challenge passed" : "Challenge complete — not passed"}
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-5">
-        <p className="font-display text-5xl font-bold">{data.challenge.overall_score}%</p>
-        <div className="grid gap-3 sm:grid-cols-3">
-          <ScoreBadge label="Writing" value={data.challenge.writing_score} />
-          <ScoreBadge label="Speaking" value={data.challenge.speaking_score} />
-          <ScoreBadge label="Recall" value={data.challenge.recall_score} />
+        <p className="font-display text-5xl font-bold">{overallScore}%</p>
+        <p className={passed ? "text-success font-medium" : "text-destructive font-medium"}>
+          {passed
+            ? `Pass — you reached the ${SCORING_CONFIG.passScore}% pass mark.`
+            : `A score of ${SCORING_CONFIG.passScore}% is required to pass.`}
+        </p>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <ScoreBadge label="Task 1 · Sentences" value={data.challenge.writing_score} />
+          <ScoreBadge label="Task 2 · New word" value={data.challenge.word_creation_score} />
         </div>
         <p className="text-muted-foreground text-sm">
-          You mastered "{data.challenge.word}". Come back tomorrow to keep your streak alive.
+          {passed
+            ? `You passed the challenge for “${data.challenge.word}”. Come back tomorrow to keep your streak alive.`
+            : `You completed both tasks for “${data.challenge.word}”. Review the feedback and keep practising.`}
         </p>
         <div className="flex flex-wrap justify-center gap-2">
           <Button asChild>

@@ -4,13 +4,17 @@ import {
   analyzeWordWithAI,
   evaluateRecallWithAI,
   evaluateMeaningWithAI,
-
   evaluateSentencesWithAI,
-  evaluatePrefixWordWithAI,
   evaluateSpeechWithAI,
+  evaluateWordCreationWithAI,
   transcribeAudio,
 } from "./ai.server";
-import { SCORING_CONFIG, overallDailyScore } from "./scoring";
+import {
+  learningChallengeScore,
+  overallDailyScore,
+  passesLearningChallenge,
+  SCORING_CONFIG,
+} from "./scoring";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type DB = SupabaseClient<any, "public", any>;
@@ -33,14 +37,68 @@ function addDays(date: string, days: number) {
 }
 
 function daysBetween(a: string, b: string) {
-  return Math.round(
-    (Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86_400_000,
-  );
+  return Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86_400_000);
 }
 
 function normalizeScore(value: unknown) {
   const n = Math.round(Number(value) || 0);
   return Math.max(0, Math.min(100, n));
+}
+
+type WordPartType = "prefix" | "root" | "suffix";
+type WordPart = { type: WordPartType; value: string; meaning: string };
+
+function availableWordParts(word: Record<string, unknown>): WordPart[] {
+  return (["prefix", "root", "suffix"] as const).flatMap((type) => {
+    const value = word[type];
+    const meaning = word[`${type}_meaning`];
+    return typeof value === "string" &&
+      value.trim() &&
+      typeof meaning === "string" &&
+      meaning.trim()
+      ? [{ type, value: value.trim(), meaning: meaning.trim() }]
+      : [];
+  });
+}
+
+function analysisFields(analysis: Awaited<ReturnType<typeof analyzeWordWithAI>>) {
+  const complete = (part: "prefix" | "root" | "suffix") => {
+    const value = analysis[part];
+    const meaning = analysis[`${part}Meaning`];
+    const exampleWord = analysis[`${part}ExampleWord`];
+    const exampleMeaning = analysis[`${part}ExampleMeaning`];
+    return value && meaning && exampleWord && exampleMeaning
+      ? { value, meaning, exampleWord, exampleMeaning }
+      : null;
+  };
+  const prefix = complete("prefix");
+  const root = complete("root");
+  const suffix = complete("suffix");
+
+  return {
+    pronunciation: analysis.pronunciation,
+    part_of_speech: analysis.partOfSpeech,
+    simple_meaning: analysis.simpleMeaning,
+    detailed_meaning: analysis.detailedMeaning,
+    breakdown_available: Boolean(prefix || root || suffix),
+    prefix: prefix?.value ?? null,
+    prefix_meaning: prefix?.meaning ?? null,
+    prefix_example_word: prefix?.exampleWord ?? null,
+    prefix_example_meaning: prefix?.exampleMeaning ?? null,
+    root: root?.value ?? null,
+    root_meaning: root?.meaning ?? null,
+    root_example_word: root?.exampleWord ?? null,
+    root_example_meaning: root?.exampleMeaning ?? null,
+    suffix: suffix?.value ?? null,
+    suffix_meaning: suffix?.meaning ?? null,
+    suffix_example_word: suffix?.exampleWord ?? null,
+    suffix_example_meaning: suffix?.exampleMeaning ?? null,
+    example: analysis.example,
+    synonyms: analysis.synonyms,
+    antonyms: analysis.antonyms,
+    difficulty: analysis.difficulty,
+    analysis_version: 2,
+  };
 }
 
 /* --------------------------------- reading --------------------------------- */
@@ -232,70 +290,50 @@ export async function startChallenge(ctx: Ctx, input: { word: string; today: str
     .maybeSingle();
 
   let vocab = cached;
-  if (!vocab) {
+  if (!vocab || Number(vocab.analysis_version ?? 1) < 2) {
     const analysis = await analyzeWordWithAI(word);
     if (!analysis.isEnglishWord)
       fail("We couldn't recognize that as a valid English word. Try another word.");
-
-    const { data: inserted, error } = await supabase
-      .from("vocabulary_words")
-      .insert({
-        word,
-        pronunciation: analysis.pronunciation,
-        part_of_speech: analysis.partOfSpeech,
-        simple_meaning: analysis.simpleMeaning,
-        detailed_meaning: analysis.detailedMeaning,
-        breakdown_available: analysis.breakdownAvailable,
-        prefix: analysis.breakdownAvailable ? analysis.prefix : null,
-        prefix_meaning: analysis.breakdownAvailable ? analysis.prefixMeaning : null,
-        prefix_example_word: analysis.breakdownAvailable ? analysis.prefixExampleWord : null,
-        prefix_example_meaning: analysis.breakdownAvailable ? analysis.prefixExampleMeaning : null,
-        root: null,
-        suffix: analysis.breakdownAvailable ? analysis.suffix : null,
-        suffix_meaning: analysis.breakdownAvailable ? analysis.suffixMeaning : null,
-        suffix_example_word: analysis.breakdownAvailable ? analysis.suffixExampleWord : null,
-        suffix_example_meaning: analysis.breakdownAvailable ? analysis.suffixExampleMeaning : null,
-        example: analysis.example,
-        synonyms: analysis.synonyms,
-        antonyms: analysis.antonyms,
-        difficulty: analysis.difficulty,
-      })
-      .select("*")
-      .single();
-    if (error) {
-      const { data: raced } = await supabase
-        .from("vocabulary_words")
-        .select("*")
-        .eq("word", word)
-        .maybeSingle();
-      vocab = raced ?? fail("We couldn't save that word. Please try again.");
-    } else {
-      vocab = inserted;
+    const fields = analysisFields(analysis);
+    if (!availableWordParts(fields).length) {
+      fail(
+        "This word has no clear reusable prefix, root, or suffix for Task 2. Please choose another word.",
+      );
     }
-  } else if (vocab.prefix_meaning == null || vocab.suffix_meaning == null) {
-    // Older cached words may be missing affix teaching details — top them up.
-    const analysis = await analyzeWordWithAI(word);
-    if (analysis.isEnglishWord && analysis.breakdownAvailable) {
-      const { data: updated } = await supabase
+
+    if (vocab) {
+      const { data: updated, error } = await supabase
         .from("vocabulary_words")
-        .update({
-          breakdown_available: true,
-          prefix: analysis.prefix,
-          prefix_meaning: analysis.prefixMeaning,
-          prefix_example_word: analysis.prefixExampleWord,
-          prefix_example_meaning: analysis.prefixExampleMeaning,
-          suffix: analysis.suffix,
-          suffix_meaning: analysis.suffixMeaning,
-          suffix_example_word: analysis.suffixExampleWord,
-          suffix_example_meaning: analysis.suffixExampleMeaning,
-        })
+        .update(fields)
         .eq("id", vocab.id)
         .select("*")
         .single();
-      if (updated) vocab = updated;
+      if (error || !updated) fail("We couldn't refresh that word. Please try again.");
+      vocab = updated;
+    } else {
+      const { data: inserted, error } = await supabase
+        .from("vocabulary_words")
+        .insert({ word, ...fields })
+        .select("*")
+        .single();
+      if (error) {
+        const { data: raced } = await supabase
+          .from("vocabulary_words")
+          .select("*")
+          .eq("word", word)
+          .maybeSingle();
+        vocab = raced ?? fail("We couldn't save that word. Please try again.");
+      } else {
+        vocab = inserted;
+      }
     }
   }
 
+  if (!vocab || !availableWordParts(vocab).length) {
+    fail(
+      "This word has no clear reusable prefix, root, or suffix for Task 2. Please choose another word.",
+    );
+  }
 
   const { data: challenge, error: challengeError } = await supabase
     .from("daily_challenges")
@@ -327,11 +365,14 @@ export async function getTodayChallenge(ctx: Ctx, today: string) {
 }
 
 export async function setStage(ctx: Ctx, input: { challengeId: string; stage: string }) {
+  if (input.stage !== "write") fail("Use Proceed to move through the challenge.");
   const { error } = await ctx.supabase
     .from("daily_challenges")
     .update({ stage: input.stage })
     .eq("id", input.challengeId)
-    .eq("user_id", ctx.userId);
+    .eq("user_id", ctx.userId)
+    .eq("stage", "learn")
+    .eq("status", "in_progress");
   if (error) fail("We couldn't save your progress.");
   return { ok: true };
 }
@@ -352,16 +393,19 @@ export async function submitSentences(
   input: {
     challengeId: string;
     sentences: { text: string; typingDurationMs: number }[];
-    prefixWord?: string | undefined;
-    prefixWordMeaning?: string | undefined;
   },
 ) {
   const challenge = await loadOwnedChallenge(ctx, input.challengeId);
   const texts = input.sentences.map((s) => s.text.trim());
-  if (texts.length !== SCORING_CONFIG.sentenceCount || texts.some((t) => t.length < 8))
+  if (texts.length !== SCORING_CONFIG.sentenceCount || texts.some((t) => t.length === 0))
     fail(`Please write all ${SCORING_CONFIG.sentenceCount} sentences before submitting.`);
 
-  const normalized = texts.map((t) => t.toLowerCase().replace(/[^a-z ]/g, "").trim());
+  const normalized = texts.map((t) =>
+    t
+      .toLowerCase()
+      .replace(/[^a-z ]/g, "")
+      .trim(),
+  );
   if (new Set(normalized).size !== normalized.length)
     fail("Your sentences must be different from one another.");
 
@@ -373,45 +417,21 @@ export async function submitSentences(
     (s) => s.typingDurationMs > 0 && s.typingDurationMs < SCORING_CONFIG.fastTypingThresholdMs,
   );
 
-  const prefix = challenge.vocabulary_words?.prefix as string | null;
-  const prefixMeaning = (challenge.vocabulary_words?.prefix_meaning ?? "") as string;
-  const prefixWord = (input.prefixWord ?? "").trim();
-  const prefixWordMeaning = (input.prefixWordMeaning ?? "").trim();
-  const prefixTaskRequired = Boolean(prefix);
-
-  if (prefixTaskRequired && (prefixWord.length < 3 || prefixWordMeaning.length < 3))
-    fail(`Create one new word using "${prefix}" and give its meaning.`);
-  if (prefixTaskRequired && prefixWord.toLowerCase() === challenge.word.toLowerCase())
-    fail("The new word must be different from the word you learned.");
-
-  const [evaluation, prefixEval] = await Promise.all([
-    evaluateSentencesWithAI({
-      word: challenge.word,
-      aiExample: challenge.vocabulary_words?.example ?? "",
-      sentences: texts,
-    }),
-    prefixTaskRequired
-      ? evaluatePrefixWordWithAI({
-          prefix: prefix as string,
-          prefixMeaning,
-          learnedWord: challenge.word,
-          candidateWord: prefixWord,
-          candidateMeaning: prefixWordMeaning,
-        })
-      : Promise.resolve(null),
-  ]);
+  const evaluation = await evaluateSentencesWithAI({
+    word: challenge.word,
+    aiExample: challenge.vocabulary_words?.example ?? "",
+    sentences: texts,
+  });
 
   const results = evaluation.results.map((r, index) => ({
     ...r,
     sentenceNumber: index + 1,
     overallScore: normalizeScore(r.overallScore),
-    passed: r.passed && normalizeScore(r.overallScore) >= SCORING_CONFIG.writingPassScore,
+    correct: r.targetWordDetected && r.errors.length === 0,
+    passed:
+      r.targetWordDetected && normalizeScore(r.overallScore) >= SCORING_CONFIG.writingPassScore,
   }));
   const overall = Math.round(results.reduce((s, r) => s + r.overallScore, 0) / results.length);
-  const prefixOk =
-    !prefixEval ||
-    (prefixEval.isRealWord && prefixEval.usesPrefix && prefixEval.meaningCorrect);
-  const allPassed = results.every((r) => r.passed) && prefixOk;
 
   await ctx.supabase.from("sentence_submissions").insert(
     results.map((r, i) => ({
@@ -426,39 +446,156 @@ export async function submitSentences(
     })),
   );
 
-  if (allPassed) {
-    await ctx.supabase
-      .from("daily_challenges")
-      .update({
-        writing_score: overall,
-        stage: "speak",
-        ...(prefixTaskRequired
-          ? { prefix_word: prefixWord, prefix_word_meaning: prefixWordMeaning }
-          : {}),
-      })
-      .eq("id", challenge.id)
-      .eq("user_id", ctx.userId);
-  }
+  await ctx.supabase
+    .from("daily_challenges")
+    .update({ writing_score: overall })
+    .eq("id", challenge.id)
+    .eq("user_id", ctx.userId)
+    .eq("stage", "write")
+    .eq("status", "in_progress");
 
   return {
     results,
     overallScore: overall,
-    passed: allPassed,
+    passed: overall >= SCORING_CONFIG.writingPassScore,
     summary: evaluation.summary,
     needsAuthorshipCheck: suspiciouslyFast,
-    prefix,
-    prefixResult: prefixEval
-      ? {
-          word: prefixWord,
-          passed: prefixOk,
-          score: normalizeScore(prefixEval.score),
-          isRealWord: prefixEval.isRealWord,
-          usesPrefix: prefixEval.usesPrefix,
-          meaningCorrect: prefixEval.meaningCorrect,
-          feedback: prefixEval.feedback,
-        }
-      : null,
   };
+}
+
+export async function advanceToWordTask(ctx: Ctx, challengeId: string) {
+  const challenge = await loadOwnedChallenge(ctx, challengeId);
+  if (challenge.stage !== "write" || challenge.writing_score == null) {
+    fail("Validate both sentences before proceeding.");
+  }
+  const { error } = await ctx.supabase
+    .from("daily_challenges")
+    .update({ stage: "speak" })
+    .eq("id", challenge.id)
+    .eq("user_id", ctx.userId)
+    .eq("stage", "write")
+    .eq("status", "in_progress");
+  if (error) fail("We couldn't save your progress.");
+  return { ok: true };
+}
+
+export async function submitCreatedWord(
+  ctx: Ctx,
+  input: {
+    challengeId: string;
+    partType: WordPartType;
+    part: string;
+    word: string;
+    meaning: string;
+  },
+) {
+  const challenge = await loadOwnedChallenge(ctx, input.challengeId);
+  if (challenge.status === "completed" || !["speak", "recall"].includes(challenge.stage)) {
+    fail("That challenge is not ready for this step.");
+  }
+
+  const parts = availableWordParts(challenge.vocabulary_words ?? {});
+  const selected = parts.find(
+    (part) => part.type === input.partType && part.value === input.part.trim(),
+  );
+  if (!selected) fail("Choose one of the word parts shown in the learning step.");
+
+  const candidateWord = input.word.trim().toLowerCase();
+  const candidateMeaning = input.meaning.trim();
+  if (candidateWord === challenge.word.toLowerCase()) {
+    fail("The new word must be different from the word you learned.");
+  }
+
+  const evaluation = await evaluateWordCreationWithAI({
+    partType: selected.type,
+    part: selected.value,
+    partMeaning: selected.meaning,
+    learnedWord: challenge.word,
+    candidateWord,
+    candidateMeaning,
+  });
+  const passed =
+    evaluation.isRealWord &&
+    evaluation.usesSelectedPart &&
+    evaluation.relationshipValid &&
+    evaluation.meaningCorrect;
+  const score = passed
+    ? 100
+    : evaluation.isRealWord && evaluation.usesSelectedPart && evaluation.relationshipValid
+      ? 50
+      : 0;
+  const result = { ...evaluation, passed, score };
+
+  const { error } = await ctx.supabase
+    .from("daily_challenges")
+    .update({
+      created_word: candidateWord,
+      created_word_meaning: candidateMeaning,
+      created_word_part_type: selected.type,
+      created_word_part: selected.value,
+      word_creation_score: score,
+      word_creation_result: result,
+      speaking_score: score,
+    })
+    .eq("id", challenge.id)
+    .eq("user_id", ctx.userId)
+    .in("stage", ["speak", "recall"])
+    .eq("status", "in_progress");
+  if (error) fail("We couldn't save that result.");
+
+  return result;
+}
+
+export async function finishChallenge(ctx: Ctx, input: { challengeId: string; today: string }) {
+  const today = assertDate(input.today);
+  let challenge = await loadOwnedChallenge(ctx, input.challengeId);
+  if (challenge.status === "completed") return { alreadyCompleted: true };
+  if (!["speak", "recall"].includes(challenge.stage)) {
+    fail("That challenge is not ready to finish.");
+  }
+  if (challenge.writing_score == null || challenge.word_creation_score == null) {
+    fail("Validate both tasks before proceeding.");
+  }
+
+  const wordCreation = normalizeScore(challenge.word_creation_score);
+  const overall = learningChallengeScore(normalizeScore(challenge.writing_score), wordCreation);
+
+  if (challenge.stage === "speak") {
+    const { error } = await ctx.supabase
+      .from("daily_challenges")
+      .update({ stage: "recall" })
+      .eq("id", challenge.id)
+      .eq("user_id", ctx.userId)
+      .eq("stage", "speak")
+      .eq("status", "in_progress");
+    if (error) fail("We couldn't save your progress.");
+    challenge = { ...challenge, stage: "recall" };
+  }
+
+  if (!passesLearningChallenge(overall)) {
+    const { error } = await ctx.supabase
+      .from("daily_challenges")
+      .update({
+        recall_score: wordCreation,
+        overall_score: overall,
+        status: "completed",
+        stage: "complete",
+        completed_at: new Date().toISOString(),
+        streak_awarded: false,
+      })
+      .eq("id", challenge.id)
+      .eq("user_id", ctx.userId);
+    if (error) fail("We couldn't complete your challenge.");
+    return { passed: false, overallScore: overall };
+  }
+
+  const completion = await completeChallenge(ctx, {
+    challenge,
+    recallScore: wordCreation,
+    today,
+    overallScore: overall,
+  });
+  return { passed: true, ...completion };
 }
 
 /* --------------------------------- speaking -------------------------------- */
@@ -473,8 +610,7 @@ export async function submitSpeech(
   },
 ) {
   const challenge = await loadOwnedChallenge(ctx, input.challengeId);
-  if (input.audioBase64.length < 2048)
-    fail("That recording was empty — please record again.");
+  if (input.audioBase64.length < 2048) fail("That recording was empty — please record again.");
 
   const transcript = await transcribeAudio({
     base64: input.audioBase64,
@@ -587,20 +723,27 @@ export async function submitRecall(
   };
 }
 
-
 /* -------------------------------- completion -------------------------------- */
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function completeChallenge(ctx: Ctx, args: { challenge: any; recallScore: number; today: string }) {
+async function completeChallenge(
+  ctx: Ctx,
+  args: {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    challenge: any;
+    recallScore: number;
+    today: string;
+    overallScore?: number;
+  },
+) {
   const { supabase, userId } = ctx;
-  const { challenge, recallScore, today } = args;
+  const { challenge, recallScore, today, overallScore } = args;
 
   const writing = normalizeScore(challenge.writing_score);
   const speaking = normalizeScore(challenge.speaking_score);
   if (!challenge.writing_score || !challenge.speaking_score)
     fail("Finish the writing and speaking stages first.");
 
-  const overall = overallDailyScore(writing, speaking, recallScore);
+  const overall = overallScore ?? overallDailyScore(writing, speaking, recallScore);
   const alreadyCompleted = challenge.status === "completed";
 
   await supabase
@@ -631,20 +774,17 @@ async function completeChallenge(ctx: Ctx, args: { challenge: any; recallScore: 
     current = current + 1;
     longest = Math.max(longest, current);
     streakIncreased = true;
-    await supabase
-      .from("streaks")
-      .upsert(
-        {
-          user_id: userId,
-          current_streak: current,
-          longest_streak: longest,
-          last_completed_date: today,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "user_id" },
-      );
+    await supabase.from("streaks").upsert(
+      {
+        user_id: userId,
+        current_streak: current,
+        longest_streak: longest,
+        last_completed_date: today,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "user_id" },
+    );
   }
-
 
   // Spaced repetition scheduling.
   if (challenge.vocabulary_word_id) {
@@ -709,7 +849,12 @@ async function evaluateAchievements(ctx: Ctx, today: string) {
       .from("user_achievements")
       .insert(newly.map((a) => ({ user_id: userId, achievement_id: a.id })));
   }
-  return newly.map((a) => ({ code: a.code, name: a.name, icon: a.icon, description: a.description }));
+  return newly.map((a) => ({
+    code: a.code,
+    name: a.name,
+    icon: a.icon,
+    description: a.description,
+  }));
 }
 
 /* --------------------------------- revision -------------------------------- */
@@ -739,7 +884,6 @@ export async function submitRevisionReview(
     SCORING_CONFIG.revisionIntervalDays[
       Math.min(reviewCount, SCORING_CONFIG.revisionIntervalDays.length - 1)
     ] ?? 7;
-
 
   await ctx.supabase
     .from("revision_items")
@@ -771,7 +915,6 @@ export async function updateProfile(
     theme?: string | undefined;
     notificationsEnabled?: boolean | undefined;
   },
-
 ) {
   const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
   if (input.fullName !== undefined) patch["full_name"] = input.fullName.trim().slice(0, 80);

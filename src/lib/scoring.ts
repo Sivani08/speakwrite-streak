@@ -1,5 +1,6 @@
 // Configurable scoring / passing rules (shared by client and server).
 export const SCORING_CONFIG = {
+  passScore: 60,
   writingPassScore: 60,
   sentenceCount: 2,
   weights: { writing: 0.4, speaking: 0.4, recall: 0.2 },
@@ -20,13 +21,20 @@ export function overallDailyScore(writing: number, speaking: number, recall: num
   return Math.round(writing * w.writing + speaking * w.speaking + recall * w.recall);
 }
 
-export const CHALLENGE_STEPS = ["learn", "write", "speak", "recall", "complete"] as const;
+export function learningChallengeScore(sentenceScore: number, wordCreationScore: number) {
+  return Math.round((sentenceScore + wordCreationScore) / 2);
+}
+
+export function passesLearningChallenge(score: number) {
+  return score >= SCORING_CONFIG.passScore;
+}
+
+export const CHALLENGE_STEPS = ["learn", "write", "speak", "complete"] as const;
 export type ChallengeStage = (typeof CHALLENGE_STEPS)[number];
 
 export const STEP_LABELS: Record<ChallengeStage, string> = {
   learn: "Learn",
-  write: "Write",
-  speak: "Speak",
-  recall: "Recall",
-  complete: "Complete",
+  write: "Sentences",
+  speak: "New word",
+  complete: "Score",
 };

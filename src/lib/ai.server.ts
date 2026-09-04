@@ -46,6 +46,10 @@ export const wordAnalysisSchema = z.object({
   prefixMeaning: z.string().nullable(),
   prefixExampleWord: z.string().nullable(),
   prefixExampleMeaning: z.string().nullable(),
+  root: z.string().nullable(),
+  rootMeaning: z.string().nullable(),
+  rootExampleWord: z.string().nullable(),
+  rootExampleMeaning: z.string().nullable(),
   suffix: z.string().nullable(),
   suffixMeaning: z.string().nullable(),
   suffixExampleWord: z.string().nullable(),
@@ -62,10 +66,15 @@ export function analyzeWordWithAI(word: string) {
     wordAnalysisSchema,
     [
       "You are a precise English lexicographer for a vocabulary learning app.",
-      "Teach PREFIXES AND SUFFIXES ONLY. Never analyse roots.",
-      "If the word begins with a genuine, standard English prefix (e.g. re-, un-, pre-, dis-, mis-, sub-, inter-, trans-, over-, under-, non-, anti-, co-, ex-, semi-, micro-, mono-, bi-, auto-, tele-), set breakdownAvailable true, prefix to that prefix (written like 'pre-'), prefixMeaning to its accurate linguistic meaning (e.g. 'before, in advance'), prefixExampleWord to a DIFFERENT real English word using the same prefix, and prefixExampleMeaning to that word's short meaning.",
-      "If the word ends with a genuine derivational English suffix (e.g. -ful, -less, -ness, -ment, -able, -ous, -tion, -ity, -ize), set suffix to that suffix, suffixMeaning to its accurate linguistic function or meaning, suffixExampleWord to a DIFFERENT real English word using it, and suffixExampleMeaning to that word's short meaning.",
-      "Use null for every prefix or suffix field when that affix is not genuinely present. Set breakdownAvailable true when a genuine prefix or suffix exists. Never invent an affix or meaning, and do not treat an ordinary ending as a suffix.",
+      "Give a conservative, linguistically and etymologically accurate analysis of genuine prefixes, roots, and suffixes.",
+      "A visible substring is not automatically a morpheme. Never split a word merely because its first or last letters resemble an affix, and never invent a historical relationship.",
+      "Use a prefix only when it is a genuine English derivational prefix in this word. Write it like 're-'.",
+      "Use a suffix only when it is a genuine English derivational suffix in this word. Write it like '-ness'.",
+      "Use a root only when a defensible lexical or classical bound root carries meaning in this word. Write the conventional root form and explain its relevant meaning, not a guessed substring.",
+      "For every non-null part, provide exactly one DIFFERENT real English related word that genuinely uses the same morpheme with the same linguistic relationship, plus that related word's short meaning.",
+      "Use null for the part, its meaning, its example word, and its example meaning whenever the analysis is uncertain or the part is not genuinely present.",
+      "Set breakdownAvailable true only when at least one complete, defensible prefix/root/suffix analysis is present. Accuracy is more important than producing a breakdown.",
+      "simpleMeaning is a concise definition. detailedMeaning is the full learner-friendly meaning, including the word's relevant sense without unnecessary complexity.",
       "pronunciation must be a simple readable respelling like 'meh-TIK-yuh-lus'.",
       "difficulty must be exactly one of: beginner, intermediate, advanced.",
       "If the input is not a real English word (gibberish, misspelling, or not English), set isEnglishWord to false and leave the other fields as empty strings, empty arrays or null.",
@@ -74,32 +83,33 @@ export function analyzeWordWithAI(word: string) {
   );
 }
 
-/* --------------------------- Prefix word validation ------------------------- */
+/* --------------------------- Created word validation ------------------------ */
 
-export const prefixWordSchema = z.object({
+export const wordCreationSchema = z.object({
   isRealWord: z.boolean(),
-  usesPrefix: z.boolean(),
+  usesSelectedPart: z.boolean(),
+  relationshipValid: z.boolean(),
   meaningCorrect: z.boolean(),
-  score: z.number(),
   feedback: z.string(),
 });
-export type PrefixWordEvaluation = z.infer<typeof prefixWordSchema>;
+export type WordCreationEvaluation = z.infer<typeof wordCreationSchema>;
 
-export function evaluatePrefixWordWithAI(input: {
-  prefix: string;
-  prefixMeaning: string;
+export function evaluateWordCreationWithAI(input: {
+  partType: "prefix" | "root" | "suffix";
+  part: string;
+  partMeaning: string;
   learnedWord: string;
   candidateWord: string;
   candidateMeaning: string;
 }) {
   return generateStructured(
-    prefixWordSchema,
+    wordCreationSchema,
     [
-      "You validate a learner's new word built from a taught English prefix.",
-      "isRealWord: true only if candidateWord is a real, standard English word found in dictionaries. Reject invented, misspelled or nonsense words.",
-      "usesPrefix: true only if candidateWord genuinely begins with the given prefix used as that prefix, and is different from the learned word.",
+      "You are a conservative English lexicographer validating a learner's morphology task.",
+      "isRealWord: true only if candidateWord is a real, standard English word found in reputable dictionaries. Reject invented, misspelled, obsolete-only, proper-name-only, or nonsense forms.",
+      "usesSelectedPart: true only if candidateWord genuinely contains the selected prefix, root, or suffix as a meaningful morpheme and is different from learnedWord.",
+      "relationshipValid: true only if the selected part has the same relevant linguistic origin, function, and sense in both words. Shared spelling alone is not enough.",
       "meaningCorrect: true if the learner's meaning captures the real meaning of candidateWord; accept simple wording.",
-      "score is 100 when all three are true, 50 when the word is real and uses the prefix but the meaning is off, and 0 otherwise.",
       "feedback is one short, encouraging sentence naming exactly what is wrong when something is wrong.",
     ].join(" "),
     JSON.stringify(input),
@@ -109,29 +119,31 @@ export function evaluatePrefixWordWithAI(input: {
 /* ---------------------------- Sentence evaluation --------------------------- */
 
 export const sentenceEvalSchema = z.object({
-  results: z.array(
-    z.object({
-      sentenceNumber: z.number(),
-      targetWordDetected: z.boolean(),
-      grammarScore: z.number(),
-      usageScore: z.number(),
-      contextScore: z.number(),
-      structureScore: z.number(),
-      naturalnessScore: z.number(),
-      overallScore: z.number(),
-      passed: z.boolean(),
-      feedback: z.string(),
-      errors: z.array(
-        z.object({
-          phrase: z.string(),
-          correction: z.string(),
-          explanation: z.string(),
-          type: z.string(),
-        }),
-      ),
-      suggestions: z.array(z.string()),
-    }),
-  ),
+  results: z
+    .array(
+      z.object({
+        sentenceNumber: z.number(),
+        targetWordDetected: z.boolean(),
+        grammarScore: z.number(),
+        spellingScore: z.number(),
+        punctuationScore: z.number(),
+        usageScore: z.number(),
+        meaningScore: z.number(),
+        structureScore: z.number(),
+        overallScore: z.number(),
+        feedback: z.string(),
+        errors: z.array(
+          z.object({
+            phrase: z.string(),
+            correction: z.string(),
+            explanation: z.string(),
+            type: z.string(),
+          }),
+        ),
+        suggestions: z.array(z.string()),
+      }),
+    )
+    .length(SCORING_CONFIG.sentenceCount),
   overallScore: z.number(),
   passed: z.boolean(),
   summary: z.string(),
@@ -147,15 +159,22 @@ export function evaluateSentencesWithAI(input: {
     sentenceEvalSchema,
     [
       "You are an accurate English grammar checker for a vocabulary app.",
-      "Check ONLY genuine errors: grammar, spelling, punctuation, broken sentence structure, and incorrect use of the target vocabulary word.",
+      "Evaluate grammar, spelling, punctuation, sentence structure, correct vocabulary usage, and whether the target word is used with its correct meaning.",
+      "Check ONLY genuine errors. Do not turn matters of taste, register, detail, or style into errors.",
       "NEVER penalise a sentence for being short, simple, generic, unsophisticated, or different from the example sentence. Simple correct sentences must score 100.",
       "Style or 'more natural' rewrites are optional suggestions only: put them in suggestions and NEVER let them reduce the score or appear in errors.",
       "errors contains ONE entry per genuine mistake: phrase must be the EXACT substring of the learner's sentence that is wrong (copied character for character, no added words), correction is the fixed form of just that phrase, explanation is one short sentence, type is one of grammar, spelling, punctuation, structure, usage.",
       "If a sentence has no genuine errors, errors must be an empty array and overallScore must be 100.",
-      "Deduct roughly 15 points per genuine error, and score 30 or lower only when the target word is missing or clearly misused.",
-      `A sentence passes when it contains the target word and scores at least ${SCORING_CONFIG.writingPassScore}.`,
+      "Score grammar, spelling, punctuation, structure, usage, and meaning from 0 to 100, then set each sentence overallScore to their rounded average. Optional suggestions must not affect any score.",
+      "Deduct only in the relevant categories for genuine errors. Score usage and meaning 0 when the target word is missing or clearly misused.",
+      "Accept 'She took a pragmatic approach to solve a problem.' as grammatically understandable; 'approach to solving' may be an optional suggestion but must not reduce the score.",
+      "Accept 'The manager can take a pragmatic approach.' as a complete grammatical sentence.",
+      "In 'She has show more resilience.', flag only 'show' and correct it to 'shown'.",
+      "In 'She is able to shown more resilience.', flag only 'shown' and correct it to 'show'.",
+      "In 'She is meticulous to her work.', flag only 'meticulous to' and correct it to 'meticulous about'.",
+      `The task-level passing threshold is ${SCORING_CONFIG.writingPassScore}%.`,
       "Never rewrite the whole sentence for the learner.",
-      "overallScore is the average of the sentence scores. passed is true only when every sentence passes.",
+      "overallScore is the rounded average of the two sentence overallScore values. passed is true when that task average reaches the configured threshold.",
     ].join(" "),
     JSON.stringify({
       targetWord: input.word,
@@ -210,7 +229,6 @@ export function evaluateMeaningWithAI(input: { word: string; meaning: string }) 
   );
 }
 
-
 /* ------------------------------ Speech analysis ----------------------------- */
 
 export const speechEvalSchema = z.object({
@@ -243,9 +261,12 @@ export async function transcribeAudio(audio: {
 
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
-    if (response.status === 429) throw new Error("Too many requests right now. Please retry shortly.");
+    if (response.status === 429)
+      throw new Error("Too many requests right now. Please retry shortly.");
     if (response.status === 402)
-      throw new Error("AI credits are exhausted for this workspace. Please add credits to continue.");
+      throw new Error(
+        "AI credits are exhausted for this workspace. Please add credits to continue.",
+      );
     throw new Error(`We couldn't process that recording. ${detail.slice(0, 160)}`);
   }
 

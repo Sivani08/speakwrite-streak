@@ -2,7 +2,8 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
-const dateInput = z.object({ today: z.string() });
+const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected an ISO calendar date.");
+const dateInput = z.object({ today: isoDate });
 
 export const fetchOverview = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -36,7 +37,7 @@ export const advanceStage = createServerFn({ method: "POST" })
     z
       .object({
         challengeId: z.string().uuid(),
-        stage: z.enum(["learn", "write", "speak", "recall", "complete"]),
+        stage: z.literal("write"),
       })
       .parse(input),
   )
@@ -52,11 +53,13 @@ export const evaluateSentences = createServerFn({ method: "POST" })
       .object({
         challengeId: z.string().uuid(),
         sentences: z
-          .array(z.object({ text: z.string().min(1).max(400), typingDurationMs: z.number() }))
-          .min(1)
-          .max(3),
-        prefixWord: z.string().max(60).optional(),
-        prefixWordMeaning: z.string().max(200).optional(),
+          .array(
+            z.object({
+              text: z.string().min(1).max(400),
+              typingDurationMs: z.number().finite().min(0).max(86_400_000),
+            }),
+          )
+          .length(2),
       })
       .parse(input),
   )
@@ -65,38 +68,40 @@ export const evaluateSentences = createServerFn({ method: "POST" })
     return submitSentences(context, data);
   });
 
-export const analyzeSpeech = createServerFn({ method: "POST" })
+export const proceedToWordTask = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) =>
-    z
-      .object({
-        challengeId: z.string().uuid(),
-        audioBase64: z.string().min(100).max(12_000_000),
-        mimeType: z.string().max(60),
-        durationSeconds: z.number().min(0).max(180),
-      })
-      .parse(input),
-  )
+  .inputValidator((input: unknown) => z.object({ challengeId: z.string().uuid() }).parse(input))
   .handler(async ({ data, context }) => {
-    const { submitSpeech } = await import("./challenge.server");
-    return submitSpeech(context, data);
+    const { advanceToWordTask } = await import("./challenge.server");
+    return advanceToWordTask(context, data.challengeId);
   });
 
-export const evaluateRecall = createServerFn({ method: "POST" })
+export const evaluateCreatedWord = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input: unknown) =>
     z
       .object({
         challengeId: z.string().uuid(),
+        partType: z.enum(["prefix", "root", "suffix"]),
+        part: z.string().min(1).max(60),
+        word: z.string().min(2).max(60),
         meaning: z.string().min(3).max(300),
-
-        today: z.string(),
       })
       .parse(input),
   )
   .handler(async ({ data, context }) => {
-    const { submitRecall } = await import("./challenge.server");
-    return submitRecall(context, data);
+    const { submitCreatedWord } = await import("./challenge.server");
+    return submitCreatedWord(context, data);
+  });
+
+export const finishLearningChallenge = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) =>
+    z.object({ challengeId: z.string().uuid(), today: isoDate }).parse(input),
+  )
+  .handler(async ({ data, context }) => {
+    const { finishChallenge } = await import("./challenge.server");
+    return finishChallenge(context, data);
   });
 
 export const fetchHistory = createServerFn({ method: "POST" })
