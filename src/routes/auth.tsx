@@ -37,6 +37,7 @@ function AuthPage() {
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [loading, setLoading] = useState(false);
+  const [loginError, setLoginError] = useState<string | null>(null);
 
   useEffect(() => {
     const isRecoveryCallback = () => {
@@ -65,6 +66,7 @@ function AuthPage() {
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault();
     if (loading) return;
+    setLoginError(null);
 
     if (isSignup) {
       if (fullName.trim().length < 2) {
@@ -115,7 +117,9 @@ function AuthPage() {
         });
         if (error) {
           if (error.message.toLowerCase().includes("invalid login credentials")) {
-            throw new Error("Incorrect email or password. Forgot it? Use “Forgot password” below.");
+            const message = "That password does not match this account. Reset it or use a secure email login link.";
+            setLoginError(message);
+            throw new Error(message);
           }
           throw error;
         }
@@ -144,6 +148,7 @@ function AuthPage() {
         redirectTo: `${window.location.origin}/reset-password`,
       });
       if (error) throw error;
+      setLoginError(null);
       toast.success("Password reset link sent. Check your inbox.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not send reset email.");
@@ -167,6 +172,7 @@ function AuthPage() {
         },
       });
       if (error) throw error;
+      setLoginError(null);
       toast.success("Secure login link sent. Open it from your inbox.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not send the login link.");
@@ -258,6 +264,19 @@ function AuthPage() {
                 {loading && <Loader2 className="size-4 animate-spin" aria-hidden />}
                 {isSignup ? "Start Your Streak" : "Log in"}
               </Button>
+               {!isSignup && loginError && (
+                 <div className="border-destructive/40 bg-destructive/5 space-y-3 rounded-md border p-3" role="alert">
+                   <p className="text-destructive text-sm">{loginError}</p>
+                   <div className="grid gap-2 sm:grid-cols-2">
+                     <Button type="button" variant="outline" size="sm" onClick={onForgotPassword} disabled={loading}>
+                       Send reset link
+                     </Button>
+                     <Button type="button" variant="outline" size="sm" onClick={onEmailLink} disabled={loading}>
+                       Send login link
+                     </Button>
+                   </div>
+                 </div>
+               )}
               {!isSignup && (
                 <div className="grid grid-cols-2 gap-2">
                   <Button type="button" variant="ghost" size="sm" onClick={onForgotPassword} disabled={loading}>
