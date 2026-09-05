@@ -57,6 +57,7 @@ export type Database = {
           created_word_part: string | null
           created_word_part_type: string | null
           id: string
+          learning_result: Json | null
           overall_score: number | null
           prefix_word: string | null
           prefix_word_meaning: string | null
@@ -70,6 +71,7 @@ export type Database = {
           word: string
           word_creation_result: Json | null
           word_creation_score: number | null
+          writing_result: Json | null
           writing_score: number | null
         }
         Insert: {
@@ -81,6 +83,7 @@ export type Database = {
           created_word_part?: string | null
           created_word_part_type?: string | null
           id?: string
+          learning_result?: Json | null
           overall_score?: number | null
           prefix_word?: string | null
           prefix_word_meaning?: string | null
@@ -94,6 +97,7 @@ export type Database = {
           word: string
           word_creation_result?: Json | null
           word_creation_score?: number | null
+          writing_result?: Json | null
           writing_score?: number | null
         }
         Update: {
@@ -105,6 +109,7 @@ export type Database = {
           created_word_part?: string | null
           created_word_part_type?: string | null
           id?: string
+          learning_result?: Json | null
           overall_score?: number | null
           prefix_word?: string | null
           prefix_word_meaning?: string | null
@@ -118,6 +123,7 @@ export type Database = {
           word?: string
           word_creation_result?: Json | null
           word_creation_score?: number | null
+          writing_result?: Json | null
           writing_score?: number | null
         }
         Relationships: [
@@ -414,6 +420,7 @@ export type Database = {
           breakdown_available: boolean
           created_at: string
           detailed_meaning: string | null
+          dictionary_sources: Json | null
           difficulty: string | null
           example: string | null
           id: string
@@ -441,6 +448,7 @@ export type Database = {
           breakdown_available?: boolean
           created_at?: string
           detailed_meaning?: string | null
+          dictionary_sources?: Json | null
           difficulty?: string | null
           example?: string | null
           id?: string
@@ -468,6 +476,7 @@ export type Database = {
           breakdown_available?: boolean
           created_at?: string
           detailed_meaning?: string | null
+          dictionary_sources?: Json | null
           difficulty?: string | null
           example?: string | null
           id?: string
