@@ -1,5 +1,6 @@
 import { AppShell } from "@/components/AppShell";
 import { ScoreBadge } from "@/components/ScoreBadge";
+import { SpeakingStep } from "@/components/SpeakingStep";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -108,7 +109,7 @@ function ChallengePage() {
   return (
     <AppShell
       title={data.challenge.word.toUpperCase()}
-      subtitle={`Step ${Math.max(1, index + 1)} of 4 · ${STEP_LABELS[stage]}`}
+      subtitle={`Step ${Math.max(1, index + 1)} of ${CHALLENGE_STEPS.length} · ${STEP_LABELS[stage]}`}
     >
       <div className="mb-4 flex flex-wrap gap-2">
         {data.choices.map(
@@ -128,7 +129,10 @@ function ChallengePage() {
         </Button>
       </div>
       <div className="mb-6">
-        <Progress value={(Math.max(index, 0) / 3) * 100} aria-label="Challenge progress" />
+        <Progress
+          value={(Math.max(index, 0) / (CHALLENGE_STEPS.length - 1)) * 100}
+          aria-label="Challenge progress"
+        />
         <ol className="text-muted-foreground mt-3 flex flex-wrap gap-4 text-xs font-semibold">
           {CHALLENGE_STEPS.map((step, i) => (
             <li key={step} className={i <= index ? "text-foreground" : undefined}>
@@ -141,6 +145,15 @@ function ChallengePage() {
 
       {stage === "learn" && <LearnStep key={data.challenge.id} data={data} onNext={invalidate} />}
       {stage === "write" && <WriteStep key={data.challenge.id} data={data} onDone={invalidate} />}
+      {stage === "pronounce" && (
+        <SpeakingStep
+          key={data.challenge.id}
+          challengeId={data.challenge.id}
+          word={data.challenge.word}
+          initialAttempts={data.speechAttempts}
+          onContinue={invalidate}
+        />
+      )}
       {stage === "speak" && (
         <WordCreationStep key={data.challenge.id} data={data} today={today} onDone={invalidate} />
       )}

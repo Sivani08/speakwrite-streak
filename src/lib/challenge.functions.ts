@@ -5,6 +5,32 @@ import { z } from "zod";
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected an ISO calendar date.");
 const dateInput = z.object({ today: isoDate });
 
+export const analyzePronunciation = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) =>
+    z
+      .object({
+        challengeId: z.string().uuid(),
+        attemptId: z.string().uuid(),
+        sentence: z.string().trim().min(1).max(400),
+        audioBase64: z.string().min(1).max(1_300_000),
+        mimeType: z.literal("audio/wav"),
+      })
+      .parse(input),
+  )
+  .handler(async ({ data, context }) => {
+    const { assessSpeaking } = await import("./speaking.server");
+    return assessSpeaking(context, data);
+  });
+
+export const continueSpeaking = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) => z.object({ challengeId: z.string().uuid() }).parse(input))
+  .handler(async ({ data, context }) => {
+    const { proceedSpeaking } = await import("./speaking.server");
+    return proceedSpeaking(context, data.challengeId);
+  });
+
 export const fetchOverview = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input: unknown) => dateInput.parse(input))

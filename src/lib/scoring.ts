@@ -29,12 +29,13 @@ export function passesLearningChallenge(score: number) {
   return score >= SCORING_CONFIG.passScore;
 }
 
-export const CHALLENGE_STEPS = ["learn", "write", "speak", "complete"] as const;
+export const CHALLENGE_STEPS = ["learn", "write", "pronounce", "speak", "complete"] as const;
 export type ChallengeStage = (typeof CHALLENGE_STEPS)[number];
 
 export const STEP_LABELS: Record<ChallengeStage, string> = {
   learn: "Learn",
   write: "Sentences",
+  pronounce: "Speaking",
   speak: "New word",
   complete: "Score",
 };

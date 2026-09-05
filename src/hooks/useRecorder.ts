@@ -1,4 +1,5 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { MAX_SPEAKING_SECONDS } from "@/lib/pronunciation";
 
 type Recording = { base64: string; mimeType: string; durationSeconds: number };
 
@@ -13,7 +14,7 @@ function encodeWav(chunks: Float32Array[], sampleRate: number): Blob {
   }
 
   const ratio = sampleRate / targetRate;
-  const outLength = Math.floor(merged.length / ratio);
+  const outLength = Math.min(Math.floor(merged.length / ratio), MAX_SPEAKING_SECONDS * targetRate);
   const samples = new Int16Array(outLength);
   for (let i = 0; i < outLength; i += 1) {
     const value = merged[Math.floor(i * ratio)] ?? 0;
@@ -54,6 +55,8 @@ async function blobToBase64(blob: Blob): Promise<string> {
 }
 
 export function useRecorder() {
+  const mounted = useRef(true);
+  const starting = useRef(false);
   const [recording, setRecording] = useState(false);
   const [seconds, setSeconds] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -67,11 +70,44 @@ export function useRecorder() {
     timer?: ReturnType<typeof setInterval>;
   }>({ chunks: [], startedAt: 0 });
 
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      const current = state.current;
+      if (current.timer) clearInterval(current.timer);
+      current.stream?.getTracks().forEach((track) => track.stop());
+      current.node?.disconnect();
+      current.source?.disconnect();
+      void current.ctx?.close().catch(() => {});
+    };
+  }, []);
+
   const start = useCallback(async () => {
+    if (starting.current || state.current.stream) return false;
+    if (!navigator.mediaDevices?.getUserMedia || typeof AudioContext === "undefined") {
+      setError(
+        "This browser does not support recording. Use a current browser on HTTPS with a microphone.",
+      );
+      return false;
+    }
+    starting.current = true;
     setError(null);
+    let stream: MediaStream | undefined;
+    let ctx: AudioContext | undefined;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const ctx = new AudioContext();
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (!mounted.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return false;
+      }
+      ctx = new AudioContext();
+      await ctx.resume();
+      if (!mounted.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        await ctx.close();
+        return false;
+      }
       const source = ctx.createMediaStreamSource(stream);
       const node = ctx.createScriptProcessor(4096, 1, 1);
       const chunks: Float32Array[] = [];
@@ -87,32 +123,47 @@ export function useRecorder() {
         source,
         chunks,
         startedAt: Date.now(),
-        timer: setInterval(() => setSeconds(Math.floor((Date.now() - state.current.startedAt) / 1000)), 500),
+        timer: setInterval(
+          () => setSeconds(Math.floor((Date.now() - state.current.startedAt) / 1000)),
+          500,
+        ),
       };
       setSeconds(0);
       setRecording(true);
       return true;
-    } catch {
-      setError("We couldn't access your microphone. Check the browser permission and try again.");
+    } catch (cause) {
+      stream?.getTracks().forEach((track) => track.stop());
+      void ctx?.close().catch(() => {});
+      setError(
+        cause instanceof DOMException && cause.name === "NotAllowedError"
+          ? "Microphone access is required for the speaking practice. Please allow microphone access and try again."
+          : "We couldn't access a working microphone. Check that it is connected and try again.",
+      );
       return false;
+    } finally {
+      starting.current = false;
     }
   }, []);
 
   const stop = useCallback(async (): Promise<Recording | null> => {
     const current = state.current;
     if (!current.ctx || !current.stream) return null;
+    state.current = { chunks: [], startedAt: 0 };
     if (current.timer) clearInterval(current.timer);
     current.stream.getTracks().forEach((track) => track.stop());
     current.node?.disconnect();
     current.source?.disconnect();
     const sampleRate = current.ctx.sampleRate;
-    const durationSeconds = (Date.now() - current.startedAt) / 1000;
-    await current.ctx.close();
+    const durationSeconds = Math.min(
+      current.chunks.reduce((sum, chunk) => sum + chunk.length, 0) / sampleRate,
+      MAX_SPEAKING_SECONDS,
+    );
     setRecording(false);
+    await current.ctx.close().catch(() => {});
 
     const blob = encodeWav(current.chunks, sampleRate);
     state.current = { chunks: [], startedAt: 0 };
-    if (blob.size < 4096) {
+    if (durationSeconds < 1 || blob.size < 32044) {
       setError("That recording was empty — please try again.");
       return null;
     }

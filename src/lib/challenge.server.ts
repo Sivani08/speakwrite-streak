@@ -189,8 +189,7 @@ export async function getChallengeDetail({ supabase, userId }: Ctx, challengeId:
       .from("speech_submissions")
       .select("*")
       .eq("challenge_id", challengeId)
-      .order("created_at", { ascending: false })
-      .limit(1),
+      .order("created_at", { ascending: false }),
     supabase
       .from("recall_submissions")
       .select("*")
@@ -203,6 +202,9 @@ export async function getChallengeDetail({ supabase, userId }: Ctx, challengeId:
     challenge,
     sentences: sentences.data ?? [],
     speech: speech.data?.[0] ?? null,
+    speechAttempts: (speech.data ?? []).filter(
+      (attempt) => attempt.assessment_provider === "azure",
+    ),
     recall: recall.data?.[0] ?? null,
   };
 }
@@ -526,7 +528,7 @@ export async function advanceToWordTask(ctx: Ctx, challengeId: string) {
   }
   const { error } = await ctx.supabase
     .from("daily_challenges")
-    .update({ stage: "speak" })
+    .update({ stage: challenge.pronunciation_required ? "pronounce" : "speak" })
     .eq("id", challenge.id)
     .eq("user_id", ctx.userId)
     .eq("stage", "write")
@@ -591,7 +593,7 @@ export async function submitCreatedWord(
       created_word_part: selected.value,
       word_creation_score: score,
       word_creation_result: result,
-      speaking_score: score,
+      ...(!challenge.pronunciation_required ? { speaking_score: score } : {}),
     })
     .eq("id", challenge.id)
     .eq("user_id", ctx.userId)
