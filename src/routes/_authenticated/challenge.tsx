@@ -27,7 +27,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { ArrowRight, CheckCircle2, CircleX, Flame, Loader2, Volume2 } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/_authenticated/challenge")({
@@ -49,12 +49,17 @@ type Stage = (typeof CHALLENGE_STEPS)[number];
 
 function ChallengePage() {
   const today = localToday();
+  const [selectedId, setSelectedId] = useState<string>();
+  const [adding, setAdding] = useState(false);
   const queryClient = useQueryClient();
   const load = useServerFn(fetchTodayChallenge);
-  const { data, isLoading, refetch } = useQuery({
-    queryKey: ["today", today],
-    queryFn: () => load({ data: { today } }),
+  const { data, isLoading, error, refetch } = useQuery({
+    queryKey: ["today", today, selectedId],
+    queryFn: () => load({ data: { today, challengeId: selectedId } }),
   });
+  useEffect(() => {
+    if (!selectedId && data?.challenge.id) setSelectedId(data.challenge.id);
+  }, [selectedId, data?.challenge.id]);
 
   const invalidate = async () => {
     await refetch();
@@ -70,10 +75,28 @@ function ChallengePage() {
     );
   }
 
-  if (!data) {
+  if (error)
+    return (
+      <AppShell title="Today's Challenge">
+        <p role="alert">{error.message}</p>
+        <Button onClick={() => refetch()}>Retry</Button>
+      </AppShell>
+    );
+
+  const openWord = (id: string) => {
+    setSelectedId(id);
+    setAdding(false);
+    invalidate();
+  };
+  if (!data || adding) {
     return (
       <AppShell title="Today's Challenge" subtitle="Pick the word you want to master today.">
-        <PickWord today={today} onStarted={invalidate} />
+        {data && (
+          <Button variant="outline" onClick={() => setAdding(false)}>
+            Return to my words
+          </Button>
+        )}
+        <PickWord today={today} onStarted={openWord} />
       </AppShell>
     );
   }
@@ -87,6 +110,23 @@ function ChallengePage() {
       title={data.challenge.word.toUpperCase()}
       subtitle={`Step ${Math.max(1, index + 1)} of 4 · ${STEP_LABELS[stage]}`}
     >
+      <div className="mb-4 flex flex-wrap gap-2">
+        {data.choices.map(
+          (choice: { id: string; word: string; status: string; score: number | null }) => (
+            <Button
+              key={choice.id}
+              variant={choice.id === data.challenge.id ? "default" : "outline"}
+              onClick={() => setSelectedId(choice.id)}
+            >
+              {choice.word}
+              {choice.status === "completed" ? ` · ${choice.score}%` : ""}
+            </Button>
+          ),
+        )}
+        <Button variant="outline" onClick={() => setAdding(true)}>
+          Add more words
+        </Button>
+      </div>
       <div className="mb-6">
         <Progress value={(Math.max(index, 0) / 3) * 100} aria-label="Challenge progress" />
         <ol className="text-muted-foreground mt-3 flex flex-wrap gap-4 text-xs font-semibold">
@@ -99,9 +139,11 @@ function ChallengePage() {
         </ol>
       </div>
 
-      {stage === "learn" && <LearnStep data={data} onNext={invalidate} />}
-      {stage === "write" && <WriteStep data={data} onDone={invalidate} />}
-      {stage === "speak" && <WordCreationStep data={data} today={today} onDone={invalidate} />}
+      {stage === "learn" && <LearnStep key={data.challenge.id} data={data} onNext={invalidate} />}
+      {stage === "write" && <WriteStep key={data.challenge.id} data={data} onDone={invalidate} />}
+      {stage === "speak" && (
+        <WordCreationStep key={data.challenge.id} data={data} today={today} onDone={invalidate} />
+      )}
       {stage === "complete" && <CompleteStep data={data} />}
     </AppShell>
   );
@@ -109,14 +151,16 @@ function ChallengePage() {
 
 /* --------------------------------- step 0 --------------------------------- */
 
-function PickWord({ today, onStarted }: { today: string; onStarted: () => void }) {
+function PickWord({ today, onStarted }: { today: string; onStarted: (id: string) => void }) {
   const [word, setWord] = useState("");
+  const [prepared, setPrepared] = useState<
+    { word: string; challengeId?: string; error?: string }[]
+  >([]);
   const start = useServerFn(startTodayChallenge);
   const mutation = useMutation({
     mutationFn: (value: string) => start({ data: { word: value, today } }),
-    onSuccess: () => {
-      toast.success("Word ready — time to learn it.");
-      onStarted();
+    onSuccess: (response) => {
+      setPrepared(response.results);
     },
     onError: (error: Error) => toast.error(error.message || "We couldn't start the challenge."),
   });
@@ -128,7 +172,7 @@ function PickWord({ today, onStarted }: { today: string; onStarted: () => void }
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <Flame className="size-5 text-streak" aria-hidden />
-          Choose today's word
+          Choose your words
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -144,12 +188,13 @@ function PickWord({ today, onStarted }: { today: string; onStarted: () => void }
           }}
         >
           <div className="space-y-1.5">
-            <Label htmlFor="word">English word</Label>
+            <Label htmlFor="word">English words (up to 10, separated by commas)</Label>
             <Input
               id="word"
               value={word}
+              disabled={mutation.isPending}
               onChange={(event) => setWord(event.target.value)}
-              placeholder="e.g. meticulous"
+              placeholder="e.g. tenacious, resilient, pragmatic"
               autoComplete="off"
             />
           </div>
@@ -160,11 +205,30 @@ function PickWord({ today, onStarted }: { today: string; onStarted: () => void }
               </>
             ) : (
               <>
-                Start today's challenge <ArrowRight className="size-4" aria-hidden />
+                Check words <ArrowRight className="size-4" aria-hidden />
               </>
             )}
           </Button>
         </form>
+        {mutation.error && (
+          <p role="alert" className="text-destructive text-sm">
+            {mutation.error.message}
+          </p>
+        )}
+        <div aria-live="polite" className="space-y-3">
+          {prepared.map((item) => (
+            <div key={item.word} className="rounded-xl border p-3">
+              <p className={item.error ? "text-destructive" : "text-success"}>
+                {item.word}: {item.error ?? "Ready to learn"}
+              </p>
+              {item.challengeId && (
+                <Button className="mt-2" onClick={() => onStarted(item.challengeId!)}>
+                  Proceed <ArrowRight className="size-4" />
+                </Button>
+              )}
+            </div>
+          ))}
+        </div>
         <div>
           <p className="text-muted-foreground text-xs tracking-wide uppercase">Need inspiration?</p>
           <div className="mt-2 flex flex-wrap gap-2">
@@ -259,6 +323,12 @@ function LearnStep({ data, onNext }: { data: ChallengeData; onNext: () => void }
           {word?.part_of_speech}
         </p>
         <p className="text-muted-foreground text-xs tracking-wide uppercase">Word breakdown</p>
+        {!word?.prefix && !word?.root && !word?.suffix && (
+          <p>
+            No reusable word part could be verified in the dictionary. You can study this meaning,
+            then use “Add more words” to choose a word for the word-part task.
+          </p>
+        )}
         <WordPartCard
           label="Prefix"
           value={word?.prefix}
@@ -291,6 +361,9 @@ function LearnStep({ data, onNext }: { data: ChallengeData; onNext: () => void }
           <span className="text-muted-foreground">Example: </span>
           <span className="italic">{word?.example}</span>
         </p>
+        <DictionarySources
+          urls={(word?.dictionary_sources ?? []).map((source: { url: string }) => source.url)}
+        />
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="bg-secondary rounded-xl p-3">
             <p className="text-muted-foreground text-xs uppercase">Synonyms</p>
@@ -327,9 +400,8 @@ type SentenceError = {
 function AnnotatedSentence({ text, errors }: { text: string; errors: SentenceError[] }) {
   const parts: Array<{ text: string; error?: SentenceError }> = [];
   let cursor = 0;
-  const lower = text.toLowerCase();
   const found = errors
-    .map((error) => ({ error, index: lower.indexOf(error.phrase.trim().toLowerCase()) }))
+    .map((error) => ({ error, index: text.indexOf(error.phrase) }))
     .filter((item) => item.index >= 0 && item.error.phrase.trim().length > 0)
     .sort((a, b) => a.index - b.index);
 
@@ -373,7 +445,8 @@ function AnnotatedSentence({ text, errors }: { text: string; errors: SentenceErr
 
 function WriteStep({ data, onDone }: { data: ChallengeData; onDone: () => void }) {
   const count = SCORING_CONFIG.sentenceCount;
-  const [values, setValues] = useState<string[]>(() => {
+  const [values, setValues] = useDraft<string[]>(`sentences:${data.challenge.id}`, () => {
+    if (data.challenge.writing_result?.sentences) return data.challenge.writing_result.sentences;
     const previous = [...(data.sentences ?? [])]
       .slice(-count)
       .sort((a, b) => a.sentence_number - b.sentence_number);
@@ -382,7 +455,9 @@ function WriteStep({ data, onDone }: { data: ChallengeData; onDone: () => void }
   const startedAt = useRef<number[]>(Array.from({ length: count }, () => 0));
   const evaluate = useServerFn(evaluateSentences);
   const proceed = useServerFn(proceedToWordTask);
-  const [submitted, setSubmitted] = useState<string[]>([]);
+  const [submitted, setSubmitted] = useState<string[]>(
+    data.challenge.writing_result?.sentences ?? [],
+  );
   const [results, setResults] = useState<
     {
       sentenceNumber: number;
@@ -393,9 +468,13 @@ function WriteStep({ data, onDone }: { data: ChallengeData; onDone: () => void }
       errors?: SentenceError[];
       suggestions?: string[];
     }[]
-  >([]);
-  const [summary, setSummary] = useState<string | null>(null);
-  const [validationComplete, setValidationComplete] = useState(false);
+  >(data.challenge.writing_result?.results ?? []);
+  const [summary, setSummary] = useState<string | null>(
+    data.challenge.writing_result?.summary ?? null,
+  );
+  const [validationComplete, setValidationComplete] = useState(
+    Boolean(data.challenge.writing_result),
+  );
 
   const mutation = useMutation({
     mutationFn: () =>
@@ -441,7 +520,10 @@ function WriteStep({ data, onDone }: { data: ChallengeData; onDone: () => void }
           usage, or meaning errors reduce the score.
         </p>
         {values.map((value, index) => {
-          const result = results.find((r) => r.sentenceNumber === index + 1);
+          const result =
+            value.trim() === submitted[index]
+              ? results.find((r) => r.sentenceNumber === index + 1)
+              : undefined;
           const errors = result?.errors ?? [];
           return (
             <div key={index} className="space-y-1.5">
@@ -449,6 +531,7 @@ function WriteStep({ data, onDone }: { data: ChallengeData; onDone: () => void }
               <Textarea
                 id={`sentence-${index}`}
                 value={value}
+                disabled={mutation.isPending || proceedMutation.isPending}
                 rows={2}
                 onFocus={() => {
                   if (!startedAt.current[index]) startedAt.current[index] = Date.now();
@@ -480,7 +563,7 @@ function WriteStep({ data, onDone }: { data: ChallengeData; onDone: () => void }
               )}
               {result?.suggestions?.length ? (
                 <p className="text-muted-foreground text-xs">
-                  Optional idea: {result.suggestions[0]}
+                  Optional ideas: {result.suggestions.join(" ")}
                 </p>
               ) : null}
             </div>
@@ -488,6 +571,13 @@ function WriteStep({ data, onDone }: { data: ChallengeData; onDone: () => void }
         })}
 
         {summary && <p className="bg-secondary rounded-xl p-3 text-sm">{summary}</p>}
+        {summary && (
+          <DictionarySources
+            urls={(data.word?.dictionary_sources ?? []).map(
+              (source: { url: string }) => source.url,
+            )}
+          />
+        )}
         <div className="flex flex-wrap gap-2">
           <Button
             size="lg"
@@ -506,7 +596,12 @@ function WriteStep({ data, onDone }: { data: ChallengeData; onDone: () => void }
             size="lg"
             variant="outline"
             onClick={() => proceedMutation.mutate()}
-            disabled={!validationComplete || mutation.isPending || proceedMutation.isPending}
+            disabled={
+              !validationComplete ||
+              values.some((value, index) => value.trim() !== submitted[index]) ||
+              mutation.isPending ||
+              proceedMutation.isPending
+            }
           >
             {proceedMutation.isPending ? (
               <Loader2 className="size-4 animate-spin" aria-hidden />
@@ -538,6 +633,7 @@ type WordCreationResult = {
   passed: boolean;
   score: number;
   feedback: string;
+  sources?: string[];
 };
 
 function WordCreationStep({
@@ -560,15 +656,38 @@ function WordCreationStep({
       part.type === data.challenge.created_word_part_type &&
       part.value === data.challenge.created_word_part,
   );
-  const [selected, setSelected] = useState<WordPartOption | null>(storedPart ?? parts[0] ?? null);
-  const [createdWord, setCreatedWord] = useState(data.challenge.created_word ?? "");
-  const [meaning, setMeaning] = useState(data.challenge.created_word_meaning ?? "");
+  const [selected, setSelected] = useDraft<WordPartOption | null>(
+    `part:${data.challenge.id}`,
+    () => storedPart ?? parts[0] ?? null,
+  );
+  const [createdWord, setCreatedWord] = useDraft<string>(
+    `word:${data.challenge.id}`,
+    () => data.challenge.created_word ?? "",
+  );
+  const [meaning, setMeaning] = useDraft<string>(
+    `meaning:${data.challenge.id}`,
+    () => data.challenge.created_word_meaning ?? "",
+  );
   const [result, setResult] = useState<WordCreationResult | null>(() => {
     const stored = data.challenge.word_creation_result;
     return stored && typeof stored === "object" ? (stored as WordCreationResult) : null;
   });
   const [validationComplete, setValidationComplete] = useState(
     data.challenge.word_creation_score != null,
+  );
+  const fingerprint = JSON.stringify([
+    selected?.type,
+    selected?.value,
+    createdWord.trim(),
+    meaning.trim(),
+  ]);
+  const [validatedFingerprint, setValidatedFingerprint] = useState(
+    JSON.stringify([
+      data.challenge.created_word_part_type,
+      data.challenge.created_word_part,
+      data.challenge.created_word,
+      data.challenge.created_word_meaning,
+    ]),
   );
   const evaluate = useServerFn(evaluateCreatedWord);
   const finish = useServerFn(finishLearningChallenge);
@@ -591,6 +710,7 @@ function WordCreationStep({
       }),
     onSuccess: (value) => {
       setResult(value as WordCreationResult);
+      setValidatedFingerprint(fingerprint);
       setValidationComplete(true);
       toast.success(`Review complete — Task 2 scored ${value.score}%.`);
     },
@@ -625,6 +745,7 @@ function WordCreationStep({
               <Button
                 key={`${part.type}-${part.value}`}
                 type="button"
+                disabled={mutation.isPending || finishMutation.isPending}
                 size="sm"
                 variant={selected?.type === part.type ? "default" : "outline"}
                 onClick={() => {
@@ -648,6 +769,7 @@ function WordCreationStep({
             <Label htmlFor="created-word">New real English word</Label>
             <Input
               id="created-word"
+              disabled={mutation.isPending || finishMutation.isPending}
               value={createdWord}
               onChange={(event) => {
                 setCreatedWord(event.target.value);
@@ -664,6 +786,7 @@ function WordCreationStep({
             <Label htmlFor="created-word-meaning">Its meaning</Label>
             <Input
               id="created-word-meaning"
+              disabled={mutation.isPending || finishMutation.isPending}
               value={meaning}
               onChange={(event) => {
                 setMeaning(event.target.value);
@@ -678,7 +801,7 @@ function WordCreationStep({
           </div>
         </div>
 
-        {result && (
+        {result && fingerprint === validatedFingerprint && (
           <div className="bg-secondary space-y-2 rounded-xl p-3 text-sm">
             <p
               className={
@@ -688,6 +811,7 @@ function WordCreationStep({
               {result.passed ? "✓ Correct" : "⚠️ Not valid"} — {result.score}%
             </p>
             <p>{result.feedback}</p>
+            <DictionarySources urls={result.sources ?? []} />
             <div className="text-muted-foreground grid gap-1 text-xs sm:grid-cols-2">
               <span>{result.isRealWord ? "✓" : "✕"} Real English word</span>
               <span>{result.usesSelectedPart ? "✓" : "✕"} Uses the selected part</span>
@@ -715,7 +839,12 @@ function WordCreationStep({
             size="lg"
             variant="outline"
             onClick={() => finishMutation.mutate()}
-            disabled={!validationComplete || mutation.isPending || finishMutation.isPending}
+            disabled={
+              !validationComplete ||
+              fingerprint !== validatedFingerprint ||
+              mutation.isPending ||
+              finishMutation.isPending
+            }
           >
             {finishMutation.isPending ? (
               <Loader2 className="size-4 animate-spin" aria-hidden />
@@ -762,7 +891,7 @@ function CompleteStep({ data }: { data: ChallengeData }) {
         </div>
         <p className="text-muted-foreground text-sm">
           {passed
-            ? `You passed the challenge for “${data.challenge.word}”. Come back tomorrow to keep your streak alive.`
+            ? `You passed the challenge for “${data.challenge.word}”. Choose another word or add more words to keep practising.`
             : `You completed both tasks for “${data.challenge.word}”. Review the feedback and keep practising.`}
         </p>
         <div className="flex flex-wrap justify-center gap-2">
@@ -775,7 +904,66 @@ function CompleteStep({ data }: { data: ChallengeData }) {
             </Link>
           </Button>
         </div>
+        {data.challenge.writing_result && (
+          <div className="space-y-3 text-left">
+            <p className="font-medium">Sentence results</p>
+            {data.challenge.writing_result.results.map(
+              (
+                row: { sentenceNumber: number; errors: SentenceError[]; feedback: string },
+                i: number,
+              ) => (
+                <div key={row.sentenceNumber}>
+                  <AnnotatedSentence
+                    text={data.challenge.writing_result.sentences[i]}
+                    errors={row.errors}
+                  />
+                  <p>{row.feedback}</p>
+                </div>
+              ),
+            )}
+          </div>
+        )}
+        {data.challenge.word_creation_result && (
+          <p>
+            {data.challenge.created_word}: {data.challenge.word_creation_result.feedback}
+          </p>
+        )}
       </CardContent>
     </Card>
   );
+}
+
+function DictionarySources({ urls }: { urls: string[] }) {
+  return (
+    <div className="text-muted-foreground flex flex-wrap gap-2 text-xs">
+      {[...new Set(urls)]
+        .filter((url) => url.startsWith("https://en.wiktionary.org/wiki/"))
+        .map((url) => (
+          <a key={url} href={url} target="_blank" rel="noreferrer" className="underline">
+            Wiktionary: {decodeURIComponent(url.split("/wiki/")[1]!.split("#")[0]!)}
+          </a>
+        ))}
+      {urls.length > 0 && <span>Definitions and etymology · CC BY-SA</span>}
+    </div>
+  );
+}
+
+function useDraft<T>(key: string, initial: () => T) {
+  const [value, setValue] = useState<T>(() => {
+    try {
+      const saved =
+        typeof window !== "undefined" ? sessionStorage.getItem(`learning:${key}`) : null;
+      return saved ? (JSON.parse(saved) as T) : initial();
+    } catch {
+      return initial();
+    }
+  });
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(`learning:${key}`, JSON.stringify(value));
+    } catch {
+      /* Storage may be disabled. */
+    }
+  }, [key, value]);
+  return [value, setValue] as const;
 }

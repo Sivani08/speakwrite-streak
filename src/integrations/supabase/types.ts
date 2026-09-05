@@ -49,6 +49,8 @@ export type Database = {
       }
       daily_challenges: {
         Row: {
+          learning_result: Json | null
+          writing_result: Json | null
           challenge_date: string
           completed_at: string | null
           created_word: string | null
@@ -74,6 +76,8 @@ export type Database = {
         }
         Insert: {
           challenge_date: string
+          learning_result?: Json | null
+          writing_result?: Json | null
           completed_at?: string | null
           created_word?: string | null
           created_word_meaning?: string | null
@@ -98,6 +102,8 @@ export type Database = {
         }
         Update: {
           challenge_date?: string
+          learning_result?: Json | null
+          writing_result?: Json | null
           completed_at?: string | null
           created_word?: string | null
           created_word_meaning?: string | null
@@ -409,6 +415,7 @@ export type Database = {
       }
       vocabulary_words: {
         Row: {
+          dictionary_sources: Json | null
           analysis_version: number
           antonyms: Json
           breakdown_available: boolean
@@ -437,6 +444,7 @@ export type Database = {
         }
         Insert: {
           analysis_version?: number
+          dictionary_sources?: Json | null
           antonyms?: Json
           breakdown_available?: boolean
           created_at?: string
@@ -464,6 +472,7 @@ export type Database = {
         }
         Update: {
           analysis_version?: number
+          dictionary_sources?: Json | null
           antonyms?: Json
           breakdown_available?: boolean
           created_at?: string

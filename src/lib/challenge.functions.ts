@@ -15,20 +15,22 @@ export const fetchOverview = createServerFn({ method: "POST" })
 
 export const fetchTodayChallenge = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) => dateInput.parse(input))
+  .inputValidator((input: unknown) =>
+    dateInput.extend({ challengeId: z.string().uuid().optional() }).parse(input),
+  )
   .handler(async ({ data, context }) => {
     const { getTodayChallenge } = await import("./challenge.server");
-    return getTodayChallenge(context, data.today);
+    return getTodayChallenge(context, data.today, data.challengeId);
   });
 
 export const startTodayChallenge = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input: unknown) =>
-    z.object({ word: z.string().min(1).max(40), today: z.string() }).parse(input),
+    z.object({ word: z.string().min(1).max(600), today: z.string() }).parse(input),
   )
   .handler(async ({ data, context }) => {
-    const { startChallenge } = await import("./challenge.server");
-    return startChallenge(context, data);
+    const { startWords } = await import("./challenge.server");
+    return startWords(context, data);
   });
 
 export const advanceStage = createServerFn({ method: "POST" })

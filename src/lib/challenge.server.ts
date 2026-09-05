@@ -98,6 +98,7 @@ function analysisFields(analysis: Awaited<ReturnType<typeof analyzeWordWithAI>>)
     antonyms: analysis.antonyms,
     difficulty: analysis.difficulty,
     analysis_version: 2,
+    dictionary_sources: analysis.dictionarySources,
   };
 }
 
@@ -270,8 +271,9 @@ export async function startChallenge(ctx: Ctx, input: { word: string; today: str
     .select("id")
     .eq("user_id", userId)
     .eq("challenge_date", today)
+    .eq("word", word)
     .maybeSingle();
-  if (existing) fail("You already started today's challenge.");
+  if (existing) return { challenge: existing, word: null };
 
   const { data: recent } = await supabase
     .from("daily_challenges")
@@ -279,6 +281,7 @@ export async function startChallenge(ctx: Ctx, input: { word: string; today: str
     .eq("user_id", userId)
     .eq("word", word)
     .gte("challenge_date", addDays(today, -30))
+    .limit(1)
     .maybeSingle();
   if (recent) fail("You've practiced this word recently. Try a different word.");
 
@@ -290,26 +293,19 @@ export async function startChallenge(ctx: Ctx, input: { word: string; today: str
     .maybeSingle();
 
   let vocab = cached;
-  if (!vocab || Number(vocab.analysis_version ?? 1) < 2) {
+  if (
+    !vocab ||
+    !vocab.dictionary_sources ||
+    Date.now() - Date.parse(vocab.dictionary_sources[0]?.retrievedAt ?? "") > 86400000
+  ) {
     const analysis = await analyzeWordWithAI(word);
     if (!analysis.isEnglishWord)
       fail("We couldn't recognize that as a valid English word. Try another word.");
     const fields = analysisFields(analysis);
-    if (!availableWordParts(fields).length) {
-      fail(
-        "This word has no clear reusable prefix, root, or suffix for Task 2. Please choose another word.",
-      );
-    }
-
     if (vocab) {
-      const { data: updated, error } = await supabase
-        .from("vocabulary_words")
-        .update(fields)
-        .eq("id", vocab.id)
-        .select("*")
-        .single();
-      if (error || !updated) fail("We couldn't refresh that word. Please try again.");
-      vocab = updated;
+      // Store a per-challenge snapshot below; refreshing a shared cache must not
+      // block learning when its UPDATE policy is absent or restricted.
+      vocab = { ...vocab, ...fields };
     } else {
       const { data: inserted, error } = await supabase
         .from("vocabulary_words")
@@ -322,17 +318,12 @@ export async function startChallenge(ctx: Ctx, input: { word: string; today: str
           .select("*")
           .eq("word", word)
           .maybeSingle();
-        vocab = raced ?? fail("We couldn't save that word. Please try again.");
+        if (!raced) databaseFailure(error);
+        vocab = { ...raced, ...fields };
       } else {
         vocab = inserted;
       }
     }
-  }
-
-  if (!vocab || !availableWordParts(vocab).length) {
-    fail(
-      "This word has no clear reusable prefix, root, or suffix for Task 2. Please choose another word.",
-    );
   }
 
   const { data: challenge, error: challengeError } = await supabase
@@ -343,25 +334,83 @@ export async function startChallenge(ctx: Ctx, input: { word: string; today: str
       word,
       challenge_date: today,
       stage: "learn",
+      learning_result: vocab,
     })
     .select("*")
     .single();
-  if (challengeError) fail("We couldn't start today's challenge. Please try again.");
+  if (challengeError) databaseFailure(challengeError);
 
   return { challenge, word: vocab };
 }
 
-export async function getTodayChallenge(ctx: Ctx, today: string) {
+function databaseFailure(error: { code?: string; message?: string }): never {
+  console.error("Learning persistence failed", error.code, error.message);
+  if (["42703", "PGRST204", "23505"].includes(error.code ?? "")) {
+    fail(
+      "The learning database update has not been applied yet. Please apply the pending learning migrations in Lovable, then retry.",
+    );
+  }
+  fail("We couldn't save your result. Please retry; your answers have been kept.");
+}
+
+export async function startWords(ctx: Ctx, input: { word: string; today: string }) {
+  const { error: schemaError } = await ctx.supabase
+    .from("daily_challenges")
+    .select("learning_result,writing_result,word_creation_result")
+    .limit(0);
+  if (schemaError) databaseFailure(schemaError);
+  const words = [
+    ...new Set(
+      input.word
+        .split(/[,;\n]+/)
+        .map((word) => word.trim().toLowerCase())
+        .filter(Boolean),
+    ),
+  ];
+  if (!words.length || words.length > 10)
+    fail("Enter between 1 and 10 words, separated by commas.");
+  const results: { word: string; challengeId?: string; error?: string }[] = [];
+  for (const word of words) {
+    try {
+      const ready = await startChallenge(ctx, { word, today: input.today });
+      results.push({ word, challengeId: ready.challenge.id });
+    } catch (error) {
+      results.push({
+        word,
+        error: error instanceof Error ? error.message : "Could not prepare this word.",
+      });
+    }
+  }
+  return { results };
+}
+
+export async function getTodayChallenge(ctx: Ctx, today: string, challengeId?: string) {
   assertDate(today);
-  const { data } = await ctx.supabase
+  const { data: choices, error } = await ctx.supabase
     .from("daily_challenges")
     .select("*, vocabulary_words(*)")
     .eq("user_id", ctx.userId)
     .eq("challenge_date", today)
-    .maybeSingle();
+    .order("created_at", { ascending: false });
+  if (error) databaseFailure(error);
+  const data =
+    choices?.find((row) => row.id === challengeId) ??
+    choices?.find((row) => row.status !== "completed") ??
+    choices?.[0];
   if (!data) return null;
   const detail = await getChallengeDetail(ctx, data.id);
-  return { ...detail, word: data.vocabulary_words };
+  return {
+    ...detail,
+    word: data.learning_result ?? data.vocabulary_words,
+    choices:
+      choices?.map((row) => ({
+        id: row.id,
+        word: row.word,
+        stage: row.stage,
+        status: row.status,
+        score: row.overall_score,
+      })) ?? [],
+  };
 }
 
 export async function setStage(ctx: Ctx, input: { challengeId: string; stage: string }) {
@@ -385,7 +434,7 @@ async function loadOwnedChallenge(ctx: Ctx, challengeId: string) {
     .eq("user_id", ctx.userId)
     .maybeSingle();
   if (!data) fail("That challenge could not be found.");
-  return data;
+  return { ...data, vocabulary_words: data.learning_result ?? data.vocabulary_words };
 }
 
 export async function submitSentences(
@@ -396,6 +445,8 @@ export async function submitSentences(
   },
 ) {
   const challenge = await loadOwnedChallenge(ctx, input.challengeId);
+  if (challenge.stage !== "write" || challenge.status !== "in_progress")
+    fail("This challenge is not ready for sentence checking.");
   const texts = input.sentences.map((s) => s.text.trim());
   if (texts.length !== SCORING_CONFIG.sentenceCount || texts.some((t) => t.length === 0))
     fail(`Please write all ${SCORING_CONFIG.sentenceCount} sentences before submitting.`);
@@ -433,7 +484,7 @@ export async function submitSentences(
   }));
   const overall = Math.round(results.reduce((s, r) => s + r.overallScore, 0) / results.length);
 
-  await ctx.supabase.from("sentence_submissions").insert(
+  const { error: submissionError } = await ctx.supabase.from("sentence_submissions").insert(
     results.map((r, i) => ({
       user_id: ctx.userId,
       challenge_id: challenge.id,
@@ -445,14 +496,19 @@ export async function submitSentences(
       passed: r.passed,
     })),
   );
+  if (submissionError) databaseFailure(submissionError);
 
-  await ctx.supabase
+  const { error: saveError } = await ctx.supabase
     .from("daily_challenges")
-    .update({ writing_score: overall })
+    .update({
+      writing_score: overall,
+      writing_result: { ...evaluation, results, sentences: texts },
+    })
     .eq("id", challenge.id)
     .eq("user_id", ctx.userId)
     .eq("stage", "write")
     .eq("status", "in_progress");
+  if (saveError) databaseFailure(saveError);
 
   return {
     results,
@@ -740,13 +796,13 @@ async function completeChallenge(
 
   const writing = normalizeScore(challenge.writing_score);
   const speaking = normalizeScore(challenge.speaking_score);
-  if (!challenge.writing_score || !challenge.speaking_score)
+  if (challenge.writing_score == null || challenge.speaking_score == null)
     fail("Finish the writing and speaking stages first.");
 
   const overall = overallScore ?? overallDailyScore(writing, speaking, recallScore);
   const alreadyCompleted = challenge.status === "completed";
 
-  await supabase
+  const { data: completed, error: completionError } = await supabase
     .from("daily_challenges")
     .update({
       recall_score: recallScore,
@@ -757,7 +813,12 @@ async function completeChallenge(
       completed_at: challenge.completed_at ?? new Date().toISOString(),
     })
     .eq("id", challenge.id)
-    .eq("user_id", userId);
+    .eq("user_id", userId)
+    .eq("status", "in_progress")
+    .select("id")
+    .maybeSingle();
+  if (completionError) databaseFailure(completionError);
+  if (!completed) return { alreadyCompleted: true };
 
   // Streak: counts every word mastered (multiple words in one day each count).
   const { data: streak } = await supabase
