@@ -49,16 +49,15 @@ export type Database = {
       }
       daily_challenges: {
         Row: {
-          learning_result: Json | null
-          writing_result: Json | null
           challenge_date: string
           completed_at: string | null
+          created_at: string
           created_word: string | null
           created_word_meaning: string | null
           created_word_part: string | null
           created_word_part_type: string | null
-          created_at: string
           id: string
+          learning_result: Json | null
           overall_score: number | null
           prefix_word: string | null
           prefix_word_meaning: string | null
@@ -72,19 +71,19 @@ export type Database = {
           word: string
           word_creation_result: Json | null
           word_creation_score: number | null
+          writing_result: Json | null
           writing_score: number | null
         }
         Insert: {
           challenge_date: string
-          learning_result?: Json | null
-          writing_result?: Json | null
           completed_at?: string | null
+          created_at?: string
           created_word?: string | null
           created_word_meaning?: string | null
           created_word_part?: string | null
           created_word_part_type?: string | null
-          created_at?: string
           id?: string
+          learning_result?: Json | null
           overall_score?: number | null
           prefix_word?: string | null
           prefix_word_meaning?: string | null
@@ -98,19 +97,19 @@ export type Database = {
           word: string
           word_creation_result?: Json | null
           word_creation_score?: number | null
+          writing_result?: Json | null
           writing_score?: number | null
         }
         Update: {
           challenge_date?: string
-          learning_result?: Json | null
-          writing_result?: Json | null
           completed_at?: string | null
+          created_at?: string
           created_word?: string | null
           created_word_meaning?: string | null
           created_word_part?: string | null
           created_word_part_type?: string | null
-          created_at?: string
           id?: string
+          learning_result?: Json | null
           overall_score?: number | null
           prefix_word?: string | null
           prefix_word_meaning?: string | null
@@ -124,6 +123,7 @@ export type Database = {
           word?: string
           word_creation_result?: Json | null
           word_creation_score?: number | null
+          writing_result?: Json | null
           writing_score?: number | null
         }
         Relationships: [
@@ -415,12 +415,12 @@ export type Database = {
       }
       vocabulary_words: {
         Row: {
-          dictionary_sources: Json | null
           analysis_version: number
           antonyms: Json
           breakdown_available: boolean
           created_at: string
           detailed_meaning: string | null
+          dictionary_sources: Json | null
           difficulty: string | null
           example: string | null
           id: string
@@ -444,11 +444,11 @@ export type Database = {
         }
         Insert: {
           analysis_version?: number
-          dictionary_sources?: Json | null
           antonyms?: Json
           breakdown_available?: boolean
           created_at?: string
           detailed_meaning?: string | null
+          dictionary_sources?: Json | null
           difficulty?: string | null
           example?: string | null
           id?: string
@@ -472,11 +472,11 @@ export type Database = {
         }
         Update: {
           analysis_version?: number
-          dictionary_sources?: Json | null
           antonyms?: Json
           breakdown_available?: boolean
           created_at?: string
           detailed_meaning?: string | null
+          dictionary_sources?: Json | null
           difficulty?: string | null
           example?: string | null
           id?: string
